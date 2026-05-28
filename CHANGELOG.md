@@ -41,6 +41,34 @@ For the conventions used to write entries in this file, see
   `DataDir` paths layout. Integration tests in `memryzed-cli` covering
   `--version`, `--help`, `init`, `doctor`, and the unimplemented-
   subcommand error path. Eight CLI plus six unit tests pass cleanly.
+- v0.1.0-alpha.2 storage layer: SQLite via `rusqlite` (bundled),
+  embedded SQL migration system tracked through `PRAGMA user_version`,
+  and migration `001_initial.sql` creating the `memories`, `projects`,
+  `recall_log`, and `meta` tables with check constraints and indexes.
+  WAL journaling, foreign keys, and a 5 second busy timeout are
+  configured at open time.
+- Domain types `Scope`, `Kind`, `Status` with database-string mapping
+  and `FromStr` validation. Stable identifier helpers
+  (`mem_<12hex>`, `sess_<12hex>`, deterministic `proj_*` and
+  `proj_local_*`).
+- Project identity computation from the current working directory.
+  When a git remote is present (`git config --get remote.origin.url`),
+  it is normalized (credentials stripped, trailing `.git` removed,
+  host lowercased) and hashed; otherwise the absolute path is hashed.
+- `Memory` and `Project` records with CRUD: `insert`, `get_by_id`,
+  `list` with scope, status, and limit filters, `archive`, and hard
+  `delete`. Validation rejects empty content, missing scope IDs for
+  non-global memories, and confidence values outside `[0.0, 1.0]`.
+- `memryzed init` now creates and migrates the SQLite database in
+  addition to the data directory and configuration. `memryzed doctor`
+  opens the database, runs `PRAGMA integrity_check`, and reports the
+  schema version.
+- New CLI commands operating on the database: `memryzed remember
+  <text> --scope ...`, `memryzed list [--scope|--project|--status]`,
+  `memryzed show <id>`, `memryzed forget <id> [--hard]`.
+- 49 core unit tests and 14 CLI integration tests covering every new
+  surface, including pinned-first ordering, scope filtering, status
+  defaults, archive/delete semantics, and validation errors.
 
 ### Changed
 
@@ -52,6 +80,8 @@ For the conventions used to write entries in this file, see
 - Section 18 of the v1 specification now distinguishes performance
   latency targets from retrieval-quality benchmarks, with the latter
   governed by the new benchmarks specification document.
+- Workspace version bumped to `0.1.0-alpha.2`. The CLI's long help
+  text reflects that storage and basic memory commands now work.
 
 ### Deprecated
 

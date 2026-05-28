@@ -15,9 +15,15 @@
 //! Command dispatch and implementations.
 
 mod doctor;
+mod forget;
 mod init;
+mod list;
+mod remember;
+mod show;
 
 use anyhow::Result;
+
+use memryzed_core::memory::{Kind, Scope, Status};
 
 use crate::cli::{Cli, Command};
 use crate::exit;
@@ -25,8 +31,8 @@ use crate::exit;
 /// Resolve subcommand and run it.
 ///
 /// When no subcommand is supplied, prints help and returns success.
-/// Subcommands not yet implemented in v0.1.0-alpha.1 return an error
-/// of kind [`crate::exit::Coded`] with a clear message.
+/// Subcommands not yet implemented in the running alpha return an
+/// error of kind [`crate::exit::Coded`] with a clear message.
 pub fn dispatch(cli: Cli) -> Result<()> {
     let Some(command) = cli.command else {
         // No subcommand: print help and exit zero.
@@ -46,15 +52,70 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Init { yes } => init::run(&context, yes),
         Command::Doctor => doctor::run(&context),
 
+        Command::Remember {
+            text,
+            scope,
+            kind,
+            pin,
+            ttl_days,
+        } => {
+            let scope: Scope = scope
+                .parse()
+                .map_err(|e: memryzed_core::Error| exit::Coded::new(exit::MISUSE, e.to_string()))?;
+            let kind: Kind = kind
+                .parse()
+                .map_err(|e: memryzed_core::Error| exit::Coded::new(exit::MISUSE, e.to_string()))?;
+            remember::run(
+                &context,
+                remember::Args {
+                    text,
+                    scope,
+                    kind,
+                    pin,
+                    ttl_days,
+                },
+            )
+        }
+
+        Command::List {
+            scope,
+            project,
+            status,
+            limit,
+        } => {
+            let scope = match scope {
+                Some(s) => Some(s.parse().map_err(|e: memryzed_core::Error| {
+                    exit::Coded::new(exit::MISUSE, e.to_string())
+                })?),
+                None => None,
+            };
+            let mut statuses = Vec::with_capacity(status.len());
+            for s in status {
+                statuses.push(
+                    s.parse::<Status>()
+                        .map_err(|e| exit::Coded::new(exit::MISUSE, e.to_string()))?,
+                );
+            }
+            list::run(
+                &context,
+                list::Args {
+                    scope,
+                    project,
+                    statuses,
+                    limit,
+                },
+            )
+        }
+
+        Command::Show { id } => show::run(&context, id),
+
+        Command::Forget { id, hard } => forget::run(&context, id, hard),
+
         Command::Install { .. }
         | Command::Uninstall { .. }
         | Command::Update { .. }
         | Command::Serve
-        | Command::List
-        | Command::Show { .. }
         | Command::Search { .. }
-        | Command::Remember { .. }
-        | Command::Forget { .. }
         | Command::Review
         | Command::Sessions
         | Command::Resume { .. }
@@ -63,7 +124,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         | Command::Export
         | Command::Import { .. } => Err(exit::Coded::new(
             exit::GENERAL_ERROR,
-            "this command is not yet implemented in v0.1.0-alpha.1",
+            "this command is not yet implemented in v0.1.0-alpha.2",
         )
         .into()),
     }

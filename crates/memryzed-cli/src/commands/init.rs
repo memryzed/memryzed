@@ -24,6 +24,8 @@ use std::fs;
 
 use anyhow::{Context as _, Result};
 
+use memryzed_core::Database;
+
 use crate::commands::Context;
 
 const DEFAULT_CONFIG: &str = include_str!("../../assets/default-config.toml");
@@ -38,6 +40,7 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
         println!("This will create:");
         println!("  {}", root.display());
         println!("    config.toml      default configuration");
+        println!("    db.sqlite        memory store");
         println!("    bin/             reserved for the binary directory");
         println!();
     }
@@ -58,6 +61,14 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
         true
     };
 
+    // Open (and migrate) the database. Idempotent.
+    let db_path = data_dir.db_file();
+    let db_already_existed = db_path.exists();
+    let db = Database::open(&db_path)
+        .with_context(|| format!("initializing database at {}", db_path.display()))?;
+    db.integrity_check()
+        .with_context(|| "post-init integrity check failed")?;
+
     if !ctx.quiet {
         if already_existed {
             println!(
@@ -73,6 +84,19 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
             println!(
                 "Configuration already present at {}; left unchanged.",
                 config_path.display()
+            );
+        }
+        if db_already_existed {
+            println!(
+                "Database already present at {}; ran migrations to schema v{}.",
+                db_path.display(),
+                db.schema_version()?
+            );
+        } else {
+            println!(
+                "Created database at {} (schema v{}).",
+                db_path.display(),
+                db.schema_version()?
             );
         }
         println!();

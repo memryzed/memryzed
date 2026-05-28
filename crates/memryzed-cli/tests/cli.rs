@@ -27,7 +27,7 @@ fn version_flag_prints_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.1.0-alpha.1"));
+        .stdout(predicate::str::contains("0.1.0-alpha.2"));
 }
 
 #[test]
@@ -38,7 +38,11 @@ fn help_flag_succeeds() {
         .success()
         .stdout(predicate::str::contains("memryzed"))
         .stdout(predicate::str::contains("init"))
-        .stdout(predicate::str::contains("doctor"));
+        .stdout(predicate::str::contains("doctor"))
+        .stdout(predicate::str::contains("remember"))
+        .stdout(predicate::str::contains("list"))
+        .stdout(predicate::str::contains("show"))
+        .stdout(predicate::str::contains("forget"));
 }
 
 #[test]
@@ -50,7 +54,7 @@ fn no_subcommand_prints_help_and_succeeds() {
 }
 
 #[test]
-fn init_creates_data_directory_and_config() {
+fn init_creates_data_directory_database_and_config() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path().join("memryzed");
 
@@ -68,6 +72,10 @@ fn init_creates_data_directory_and_config() {
         "init must write config.toml"
     );
     assert!(dir.join("bin").is_dir(), "init must create bin/");
+    assert!(
+        dir.join("db.sqlite").is_file(),
+        "init must create db.sqlite"
+    );
 }
 
 #[test]
@@ -85,9 +93,9 @@ fn init_is_idempotent() {
             .success();
     }
 
-    // Both runs leave the same files in place.
     assert!(dir.join("config.toml").is_file());
     assert!(dir.join("bin").is_dir());
+    assert!(dir.join("db.sqlite").is_file());
 }
 
 #[test]
@@ -124,7 +132,250 @@ fn doctor_succeeds_after_init() {
         .arg("doctor")
         .assert()
         .success()
+        .stdout(predicate::str::contains("Database integrity"))
+        .stdout(predicate::str::contains("schema v1"))
         .stdout(predicate::str::contains("All systems healthy"));
+}
+
+#[test]
+fn remember_then_list_shows_the_memory() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("remember")
+        .arg("I prefer pnpm")
+        .arg("--scope")
+        .arg("global")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Stored memory"))
+        .stdout(predicate::str::contains("I prefer pnpm"));
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("I prefer pnpm"))
+        .stdout(predicate::str::contains("global"));
+}
+
+#[test]
+fn remember_with_pin_lists_first_with_marker() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("remember")
+        .arg("non-pinned thought")
+        .arg("--scope")
+        .arg("global")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("remember")
+        .arg("important fact")
+        .arg("--scope")
+        .arg("global")
+        .arg("--pin")
+        .assert()
+        .success();
+
+    let output = cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("list")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8_lossy(&output).to_string();
+
+    let pinned_pos = text.find("important fact").expect("pinned listed");
+    let normal_pos = text.find("non-pinned thought").expect("normal listed");
+    assert!(
+        pinned_pos < normal_pos,
+        "pinned memory must list first; got:\n{text}"
+    );
+}
+
+#[test]
+fn show_prints_full_memory_detail() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    let stdout = cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("remember")
+        .arg("hello world")
+        .arg("--scope")
+        .arg("global")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&stdout).to_string();
+    let id = stdout
+        .split_whitespace()
+        .find(|t| t.starts_with("mem_"))
+        .expect("ID present in remember output")
+        .to_string();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("show")
+        .arg(&id)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&id))
+        .stdout(predicate::str::contains("hello world"))
+        .stdout(predicate::str::contains("Scope"))
+        .stdout(predicate::str::contains("Kind"));
+}
+
+#[test]
+fn forget_archives_then_list_excludes_by_default() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    let stdout = cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("remember")
+        .arg("forget me")
+        .arg("--scope")
+        .arg("global")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8_lossy(&stdout).to_string();
+    let id = stdout
+        .split_whitespace()
+        .find(|t| t.starts_with("mem_"))
+        .expect("ID present")
+        .to_string();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("forget")
+        .arg(&id)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Archived"));
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No memories match the filter"));
+
+    // Archived memories are still visible with --status archived.
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("list")
+        .arg("--status")
+        .arg("archived")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("forget me"));
+}
+
+#[test]
+fn forget_unknown_id_returns_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("forget")
+        .arg("mem_doesnotexist")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn remember_unknown_scope_returns_misuse() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("remember")
+        .arg("x")
+        .arg("--scope")
+        .arg("wing")
+        .assert()
+        .failure()
+        .code(2);
 }
 
 #[test]

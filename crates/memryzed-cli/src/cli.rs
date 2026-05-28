@@ -36,8 +36,9 @@ Memryzed runs as a local MCP server. Any MCP-aware client (Claude Code,
 Kiro, Codex, Cursor, Copilot CLI, Continue) can use it for durable
 memory and resumable session state.
 
-This is a pre-release build. Most commands return a not-implemented
-error. See https://memryzed.com for the roadmap.";
+This is a pre-release build. Storage and CLI memory commands work;
+embeddings, hybrid retrieval, and the MCP server arrive in subsequent
+alphas. See https://memryzed.com for the roadmap.";
 
 /// Top-level CLI definition.
 #[derive(Debug, Parser)]
@@ -134,7 +135,23 @@ pub enum Command {
     Serve,
 
     /// List memories.
-    List,
+    List {
+        /// Restrict to a scope: global, project, session.
+        #[arg(long, value_name = "KIND")]
+        scope: Option<String>,
+
+        /// Restrict to a specific project ID. Implies --scope project.
+        #[arg(long, value_name = "ID")]
+        project: Option<String>,
+
+        /// Show memories with the given status. Repeatable.
+        #[arg(long, value_name = "STATUS")]
+        status: Vec<String>,
+
+        /// Maximum number of results.
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+    },
 
     /// Show full detail for a single memory.
     Show {
@@ -152,12 +169,32 @@ pub enum Command {
     Remember {
         /// Memory content.
         text: String,
+
+        /// Scope to insert into: global, project, or session.
+        #[arg(long, value_name = "KIND", default_value = "global")]
+        scope: String,
+
+        /// Kind of memory: preference, fact, decision, or todo.
+        #[arg(long, value_name = "KIND", default_value = "fact")]
+        kind: String,
+
+        /// Pin the memory so it never expires.
+        #[arg(long)]
+        pin: bool,
+
+        /// Expire after this many days.
+        #[arg(long, value_name = "DAYS")]
+        ttl_days: Option<u32>,
     },
 
     /// Archive a memory.
     Forget {
         /// Memory ID.
         id: String,
+
+        /// Permanently delete instead of archiving.
+        #[arg(long)]
+        hard: bool,
     },
 
     /// Open the review TUI for pending memories.

@@ -42,13 +42,10 @@ pub fn run(ctx: &Context) -> Result<()> {
     }
 
     report.section("Memory and integrations");
-    report.add(skipped(
-        "Database integrity",
-        "no database in v0.1.0-alpha.1; lands in alpha.2",
-    ));
+    report.add(check_database(ctx));
     report.add(skipped(
         "Embedding model",
-        "no embeddings in v0.1.0-alpha.1; lands in alpha.3",
+        "embeddings land in v0.1.0-alpha.3",
     ));
     report.add(skipped(
         "MCP integrations",
@@ -209,4 +206,30 @@ fn check_config_file(ctx: &Context) -> CheckResult {
             format!("missing at {}; run `memryzed init`", path.display()),
         )
     }
+}
+
+fn check_database(ctx: &Context) -> CheckResult {
+    let dir = match ctx.data_dir() {
+        Ok(d) => d,
+        Err(err) => return fail("Database integrity", err.to_string()),
+    };
+    let path = dir.db_file();
+    if !path.is_file() {
+        return fail(
+            "Database integrity",
+            format!("no database at {}; run `memryzed init`", path.display()),
+        );
+    }
+    let db = match memryzed_core::Database::open(&path) {
+        Ok(d) => d,
+        Err(err) => return fail("Database integrity", format!("could not open: {err}")),
+    };
+    if let Err(err) = db.integrity_check() {
+        return fail("Database integrity", err.to_string());
+    }
+    let version = match db.schema_version() {
+        Ok(v) => v,
+        Err(err) => return fail("Database integrity", err.to_string()),
+    };
+    ok("Database integrity", format!("schema v{version}, ok"))
 }
