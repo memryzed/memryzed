@@ -20,6 +20,7 @@ mod init;
 mod list;
 mod remember;
 mod search;
+mod serve;
 mod show;
 
 use anyhow::Result;
@@ -133,10 +134,11 @@ pub fn dispatch(cli: Cli) -> Result<()> {
 
         Command::Forget { id, hard } => forget::run(&context, id, hard),
 
+        Command::Serve => serve::run(&context),
+
         Command::Install { .. }
         | Command::Uninstall { .. }
         | Command::Update { .. }
-        | Command::Serve
         | Command::Review
         | Command::Sessions
         | Command::Resume { .. }
@@ -145,7 +147,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         | Command::Export
         | Command::Import { .. } => Err(exit::Coded::new(
             exit::GENERAL_ERROR,
-            "this command is not yet implemented in v0.1.0-alpha.4",
+            "this command is not yet implemented in v0.1.0-alpha.5",
         )
         .into()),
     }

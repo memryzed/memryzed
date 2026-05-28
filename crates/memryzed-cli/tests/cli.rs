@@ -30,7 +30,7 @@ fn version_flag_prints_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.1.0-alpha.4"));
+        .stdout(predicate::str::contains("0.1.0-alpha.5"));
 }
 
 #[test]
@@ -384,7 +384,7 @@ fn remember_unknown_scope_returns_misuse() {
 #[test]
 fn unimplemented_subcommand_fails_with_message() {
     cmd()
-        .arg("serve")
+        .arg("review")
         .assert()
         .failure()
         .stderr(predicate::str::contains("not yet implemented"));
