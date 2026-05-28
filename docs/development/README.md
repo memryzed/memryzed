@@ -10,6 +10,8 @@ See `../README.md` for the user-facing index.
 
 ## Contents
 
+- `status.md` - the current project state (read this first when
+  picking up the project after time away).
 - `setup.md` - getting a working development environment.
 - `branching.md` - git workflow, branch naming, and pull requests.
 - `testing.md` - how tests are organized and run.
