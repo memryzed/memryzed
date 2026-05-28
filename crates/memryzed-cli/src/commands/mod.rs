@@ -19,6 +19,7 @@ mod forget;
 mod init;
 mod list;
 mod remember;
+mod search;
 mod show;
 
 use anyhow::Result;
@@ -109,13 +110,33 @@ pub fn dispatch(cli: Cli) -> Result<()> {
 
         Command::Show { id } => show::run(&context, id),
 
+        Command::Search {
+            query,
+            scope,
+            limit,
+        } => {
+            let scope = match scope {
+                Some(s) => Some(s.parse().map_err(|e: memryzed_core::Error| {
+                    exit::Coded::new(exit::MISUSE, e.to_string())
+                })?),
+                None => None,
+            };
+            search::run(
+                &context,
+                search::Args {
+                    query,
+                    scope,
+                    limit,
+                },
+            )
+        }
+
         Command::Forget { id, hard } => forget::run(&context, id, hard),
 
         Command::Install { .. }
         | Command::Uninstall { .. }
         | Command::Update { .. }
         | Command::Serve
-        | Command::Search { .. }
         | Command::Review
         | Command::Sessions
         | Command::Resume { .. }
@@ -124,7 +145,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         | Command::Export
         | Command::Import { .. } => Err(exit::Coded::new(
             exit::GENERAL_ERROR,
-            "this command is not yet implemented in v0.1.0-alpha.3",
+            "this command is not yet implemented in v0.1.0-alpha.4",
         )
         .into()),
     }

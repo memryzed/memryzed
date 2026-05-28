@@ -163,6 +163,14 @@ pub enum Command {
     Search {
         /// Query string.
         query: String,
+
+        /// Restrict to a scope: global, project, session.
+        #[arg(long, value_name = "KIND")]
+        scope: Option<String>,
+
+        /// Maximum number of results.
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
     },
 
     /// Add a memory directly.

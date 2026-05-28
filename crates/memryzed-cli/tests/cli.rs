@@ -30,7 +30,7 @@ fn version_flag_prints_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.1.0-alpha.3"));
+        .stdout(predicate::str::contains("0.1.0-alpha.4"));
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn doctor_succeeds_after_init() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Database integrity"))
-        .stdout(predicate::str::contains("schema v2"))
+        .stdout(predicate::str::contains("schema v3"))
         .stdout(predicate::str::contains("All systems healthy"));
 }
 

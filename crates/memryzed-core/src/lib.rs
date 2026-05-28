@@ -31,6 +31,7 @@ pub mod id;
 pub mod memory;
 pub mod paths;
 pub mod projects;
+pub mod retrieval;
 pub mod storage;
 pub mod version;
 
@@ -38,5 +39,6 @@ pub use clock::now_epoch_seconds;
 pub use embedder::{Embedder, NoopEmbedder};
 pub use error::{Error, Result};
 pub use paths::DataDir;
+pub use retrieval::{search, SearchOptions, SearchResult};
 pub use storage::Database;
 pub use version::VERSION;

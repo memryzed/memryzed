@@ -144,6 +144,7 @@ mod tests {
         for required in [
             "memories",
             "memory_embeddings",
+            "memory_fts",
             "projects",
             "recall_log",
             "meta",

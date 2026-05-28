@@ -93,6 +93,14 @@ For the conventions used to write entries in this file, see
   the prebuilt ONNX Runtime links cleanly on glibc < 2.38. On
   newer systems the strong glibc symbols take precedence and the
   shim is unused.
+- v0.1.0-alpha.4 hybrid retrieval. Migration 003 adds the FTS5
+  virtual table `memory_fts` and triggers that mirror inserts,
+  updates, and deletes on `memories.content`. New `retrieval`
+  module computes a hybrid score from cosine similarity over the
+  stored embeddings, normalized BM25, and a recency boost
+  (`exp(-age_days / 30)`), with a small additive bonus for pinned
+  memories. The CLI gains `memryzed search <query>` printing
+  ranked results with the per-signal score breakdown.
 
 ### Changed
 
