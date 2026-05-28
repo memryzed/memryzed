@@ -252,7 +252,7 @@ For reference, the standard locations Memryzed reads when running
 `memryzed install`:
 
     Claude Code:    ~/.claude/mcp.json
-    Kiro CLI:       ~/.kiro/mcp.json
+    Kiro CLI:       ~/.kiro/settings/mcp.json
     Cursor:         ~/.cursor/mcp.json
     Codex CLI:      ~/.codex/mcp.json
     Copilot CLI:    varies, see the gh-copilot extension docs
