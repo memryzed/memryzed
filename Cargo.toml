@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/memryzed-core",
+    "crates/memryzed-mcp",
+    "crates/memryzed-cli",
+    "crates/memryzed-tui",
+]
+
+[workspace.package]
+version = "0.1.0-alpha.1"
+edition = "2021"
+rust-version = "1.78"
+license = "Apache-2.0"
+authors = ["Memryzed contributors"]
+homepage = "https://memryzed.com"
+repository = "https://github.com/memryzed/memryzed"
+description = "Persistent memory and session state for AI coding agents."
+keywords = ["mcp", "memory", "ai", "agent", "llm"]
+categories = ["command-line-utilities", "development-tools"]
+
+[workspace.dependencies]
+# Internal
+memryzed-core = { path = "crates/memryzed-core", version = "0.1.0-alpha.1" }
+memryzed-mcp = { path = "crates/memryzed-mcp", version = "0.1.0-alpha.1" }
+memryzed-tui = { path = "crates/memryzed-tui", version = "0.1.0-alpha.1" }
+
+# External
+anyhow = "1.0"
+thiserror = "1.0"
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1.40", features = ["full"] }
+directories = "5.0"
+
+# Test-only
+tempfile = "3.10"
+assert_cmd = "2.0"
+predicates = "3.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
