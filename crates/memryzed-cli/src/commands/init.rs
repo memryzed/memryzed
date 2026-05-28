@@ -24,6 +24,7 @@ use std::fs;
 
 use anyhow::{Context as _, Result};
 
+use memryzed_core::embedder::{make_default, ENV_DISABLE};
 use memryzed_core::Database;
 
 use crate::commands::Context;
@@ -42,6 +43,7 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
         println!("    config.toml      default configuration");
         println!("    db.sqlite        memory store");
         println!("    bin/             reserved for the binary directory");
+        println!("    models/          embedding model cache (~130 MB on first run)");
         println!();
     }
 
@@ -51,6 +53,12 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
         .with_context(|| format!("creating data directory at {}", root.display()))?;
     fs::create_dir_all(data_dir.bin_dir())
         .with_context(|| format!("creating bin directory at {}", data_dir.bin_dir().display()))?;
+    fs::create_dir_all(data_dir.models_dir()).with_context(|| {
+        format!(
+            "creating models directory at {}",
+            data_dir.models_dir().display()
+        )
+    })?;
 
     let config_path = data_dir.config_file();
     let wrote_config = if config_path.exists() {
@@ -68,6 +76,28 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
         .with_context(|| format!("initializing database at {}", db_path.display()))?;
     db.integrity_check()
         .with_context(|| "post-init integrity check failed")?;
+
+    // Warm-load the embedding model. Skipped if MEMRYZED_DISABLE_EMBEDDING is set.
+    let embedder_status = if std::env::var(ENV_DISABLE).is_ok() {
+        EmbedderInit::Skipped
+    } else if !ctx.quiet {
+        println!("Loading embedding model (downloads on first run)...");
+        match make_default(&data_dir.models_dir()) {
+            Ok(e) => EmbedderInit::Loaded {
+                model: e.model_id().to_string(),
+                dim: e.dimension(),
+            },
+            Err(e) => EmbedderInit::Failed(e.to_string()),
+        }
+    } else {
+        match make_default(&data_dir.models_dir()) {
+            Ok(e) => EmbedderInit::Loaded {
+                model: e.model_id().to_string(),
+                dim: e.dimension(),
+            },
+            Err(e) => EmbedderInit::Failed(e.to_string()),
+        }
+    };
 
     if !ctx.quiet {
         if already_existed {
@@ -99,6 +129,19 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
                 db.schema_version()?
             );
         }
+        match embedder_status {
+            EmbedderInit::Loaded { model, dim } => {
+                let dim_label = dim.map(|d| d.to_string()).unwrap_or_else(|| "?".into());
+                println!("Loaded embedding model {model} (dim={dim_label}).");
+            }
+            EmbedderInit::Skipped => {
+                println!("Skipped embedding model (MEMRYZED_DISABLE_EMBEDDING set).");
+            }
+            EmbedderInit::Failed(e) => {
+                println!("Embedding model could not be loaded: {e}");
+                println!("Memryzed will store memories without embeddings until this resolves.");
+            }
+        }
         println!();
         println!("Memryzed is initialized.");
         println!(
@@ -107,4 +150,10 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+enum EmbedderInit {
+    Loaded { model: String, dim: Option<usize> },
+    Skipped,
+    Failed(String),
 }

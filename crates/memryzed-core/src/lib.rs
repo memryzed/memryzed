@@ -25,6 +25,7 @@
 #![warn(missing_docs)]
 
 pub mod clock;
+pub mod embedder;
 pub mod error;
 pub mod id;
 pub mod memory;
@@ -34,6 +35,7 @@ pub mod storage;
 pub mod version;
 
 pub use clock::now_epoch_seconds;
+pub use embedder::{Embedder, NoopEmbedder};
 pub use error::{Error, Result};
 pub use paths::DataDir;
 pub use storage::Database;

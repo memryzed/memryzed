@@ -30,6 +30,7 @@ pub use status::Status;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+use crate::embedder::Embedder;
 use crate::error::{Error, Result};
 use crate::id::new_memory_id;
 use crate::storage::Database;
@@ -279,6 +280,134 @@ pub fn delete(db: &Database, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Insert a memory together with its embedding in a single transaction.
+///
+/// The embedder is consulted for the content. If the returned vector
+/// is empty (for example, a [`crate::NoopEmbedder`]), no embedding row
+/// is written. The `embedding_model` column on `memories` is updated
+/// to record which model produced the stored embedding.
+pub fn insert_with_embedder(
+    db: &mut Database,
+    new: NewMemory,
+    embedder: &dyn Embedder,
+    now: i64,
+) -> Result<Memory> {
+    validate_new(&new)?;
+    let id = new_memory_id();
+    let status = if new.pinned {
+        Status::Pinned
+    } else {
+        Status::Approved
+    };
+
+    let content_for_embed = new.content.clone();
+    let embedding = embedder.embed(&[content_for_embed.as_str()])?;
+    let embedding_vec = embedding.into_iter().next().unwrap_or_default();
+    let store_embedding = !embedding_vec.is_empty() && embedder.is_active();
+    let model_id = if store_embedding {
+        Some(embedder.model_id().to_string())
+    } else {
+        None
+    };
+
+    let tx = db.conn_mut().transaction()?;
+    tx.execute(
+        "INSERT INTO memories (
+            id, scope_kind, scope_id, content, kind, source_turn_id, source_client,
+            status, created_at, updated_at, expires_at, pinned, confidence, embedding_model
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            id,
+            new.scope.as_db_str(),
+            new.scope_id,
+            new.content,
+            new.kind.as_db_str(),
+            new.source_turn_id,
+            new.source_client,
+            status.as_db_str(),
+            now,
+            new.expires_at,
+            i64::from(new.pinned),
+            new.confidence,
+            model_id,
+        ],
+    )?;
+
+    if store_embedding {
+        let dim = embedding_vec.len() as i64;
+        let bytes = embedding_to_bytes(&embedding_vec);
+        tx.execute(
+            "INSERT INTO memory_embeddings (memory_id, model, dim, embedding)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, embedder.model_id(), dim, bytes],
+        )?;
+    }
+    tx.commit()?;
+
+    get_by_id(db, &id)?.ok_or_else(|| Error::memory_not_found(id))
+}
+
+/// Look up the embedding for a memory.
+pub fn get_embedding(db: &Database, memory_id: &str) -> Result<Option<StoredEmbedding>> {
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT model, dim, embedding FROM memory_embeddings WHERE memory_id = ?1")?;
+    let mut rows = stmt.query(params![memory_id])?;
+    if let Some(row) = rows.next()? {
+        let model: String = row.get(0)?;
+        let dim: i64 = row.get(1)?;
+        let bytes: Vec<u8> = row.get(2)?;
+        let embedding = bytes_to_embedding(&bytes)?;
+        if embedding.len() as i64 != dim {
+            return Err(Error::Validation(format!(
+                "stored embedding has {} floats but row records dim={dim}",
+                embedding.len()
+            )));
+        }
+        Ok(Some(StoredEmbedding {
+            memory_id: memory_id.to_string(),
+            model,
+            embedding,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+/// An embedding row joined with its memory id.
+#[derive(Debug, Clone)]
+pub struct StoredEmbedding {
+    /// Memory the embedding belongs to.
+    pub memory_id: String,
+    /// Model that produced the embedding.
+    pub model: String,
+    /// The vector itself.
+    pub embedding: Vec<f32>,
+}
+
+fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(embedding.len() * 4);
+    for f in embedding {
+        out.extend_from_slice(&f.to_le_bytes());
+    }
+    out
+}
+
+fn bytes_to_embedding(bytes: &[u8]) -> Result<Vec<f32>> {
+    if bytes.len() % 4 != 0 {
+        return Err(Error::Validation(format!(
+            "embedding bytes length {} is not a multiple of 4",
+            bytes.len()
+        )));
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4);
+    for chunk in bytes.chunks_exact(4) {
+        let arr: [u8; 4] = chunk.try_into().expect("chunks_exact size 4");
+        out.push(f32::from_le_bytes(arr));
+    }
+    Ok(out)
+}
+
 const SELECT_COLUMNS: &str = "
     SELECT id, scope_kind, scope_id, content, kind, status, pinned, confidence,
            created_at, updated_at, expires_at, source_turn_id, source_client
@@ -462,5 +591,90 @@ mod tests {
         let m = insert(&db, NewMemory::new(Scope::Global, "x"), 0).unwrap();
         delete(&db, &m.id).unwrap();
         assert!(get_by_id(&db, &m.id).unwrap().is_none());
+    }
+
+    /// Deterministic embedder used to test storage round-trip without
+    /// loading a real model.
+    struct DeterministicEmbedder;
+
+    impl Embedder for DeterministicEmbedder {
+        fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+            Ok(texts
+                .iter()
+                .map(|t| {
+                    let mut v = vec![0.0_f32; 4];
+                    for (i, c) in t.chars().take(4).enumerate() {
+                        v[i] = c as u32 as f32;
+                    }
+                    v
+                })
+                .collect())
+        }
+        fn dimension(&self) -> Option<usize> {
+            Some(4)
+        }
+        fn model_id(&self) -> &str {
+            "test-deterministic"
+        }
+    }
+
+    #[test]
+    fn insert_with_embedder_stores_embedding_atomically() {
+        let mut db = fresh_db();
+        let embedder = DeterministicEmbedder;
+        let m = insert_with_embedder(
+            &mut db,
+            NewMemory::new(Scope::Global, "abcd"),
+            &embedder,
+            100,
+        )
+        .unwrap();
+
+        let stored = get_embedding(&db, &m.id).unwrap().expect("embedding row");
+        assert_eq!(stored.memory_id, m.id);
+        assert_eq!(stored.model, "test-deterministic");
+        assert_eq!(stored.embedding.len(), 4);
+        assert_eq!(stored.embedding[0], 'a' as u32 as f32);
+        assert_eq!(stored.embedding[1], 'b' as u32 as f32);
+    }
+
+    #[test]
+    fn insert_with_noop_embedder_does_not_store_embedding() {
+        let mut db = fresh_db();
+        let embedder = crate::NoopEmbedder;
+        let m = insert_with_embedder(
+            &mut db,
+            NewMemory::new(Scope::Global, "no embed"),
+            &embedder,
+            0,
+        )
+        .unwrap();
+        assert!(get_embedding(&db, &m.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn get_embedding_returns_none_for_unknown_memory() {
+        let db = fresh_db();
+        assert!(get_embedding(&db, "mem_doesnotexist").unwrap().is_none());
+    }
+
+    #[test]
+    fn deleting_memory_cascades_to_embedding() {
+        let mut db = fresh_db();
+        let embedder = DeterministicEmbedder;
+        let m = insert_with_embedder(&mut db, NewMemory::new(Scope::Global, "abcd"), &embedder, 0)
+            .unwrap();
+        assert!(get_embedding(&db, &m.id).unwrap().is_some());
+        delete(&db, &m.id).unwrap();
+        assert!(get_embedding(&db, &m.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn embedding_byte_round_trip() {
+        let original: Vec<f32> = vec![1.5, -0.25, 0.0, 1234.5];
+        let bytes = embedding_to_bytes(&original);
+        assert_eq!(bytes.len(), original.len() * 4);
+        let restored = bytes_to_embedding(&bytes).unwrap();
+        assert_eq!(restored, original);
     }
 }

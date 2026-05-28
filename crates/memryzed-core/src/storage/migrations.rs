@@ -34,11 +34,18 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    target_version: 1,
-    name: "001_initial",
-    sql: include_str!("../../migrations/001_initial.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        target_version: 1,
+        name: "001_initial",
+        sql: include_str!("../../migrations/001_initial.sql"),
+    },
+    Migration {
+        target_version: 2,
+        name: "002_embeddings",
+        sql: include_str!("../../migrations/002_embeddings.sql"),
+    },
+];
 
 /// Highest schema version known to this binary.
 pub fn current_schema_version() -> i32 {

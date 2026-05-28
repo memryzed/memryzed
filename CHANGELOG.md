@@ -69,6 +69,30 @@ For the conventions used to write entries in this file, see
 - 49 core unit tests and 14 CLI integration tests covering every new
   surface, including pinned-first ordering, scope filtering, status
   defaults, archive/delete semantics, and validation errors.
+- v0.1.0-alpha.3 embedder: `fastembed-rs` integration with the
+  BGE-small-en-v1.5 model (384-dim output). New `embedder` module
+  with the `Embedder` trait, `FastembedEmbedder`, and a `NoopEmbedder`
+  used by tests and when `MEMRYZED_DISABLE_EMBEDDING` is set.
+- Migration 002 adds the `memory_embeddings` table (`memory_id` PK
+  with FK + cascade delete on `memories.id`, plus `model`, `dim`,
+  and a little-endian `f32` BLOB column). New
+  `memory::insert_with_embedder` runs the memory insert and the
+  embedding insert in a single transaction; `memory::get_embedding`
+  reads the row back.
+- `memryzed init` now creates `~/.memryzed/models/` and warm-loads
+  the embedder, downloading the model on first run. The download
+  step is skipped when `MEMRYZED_DISABLE_EMBEDDING` is set.
+- `memryzed remember` now embeds the content as part of the same
+  transaction that inserts the memory, and reports the model id and
+  dimension in its output.
+- `memryzed doctor` adds a real Embedding model check that loads
+  the embedder and reports the model id and dimension; reports a
+  skip with the environment-variable name when disabled.
+- Cross-platform support: a small Linux-only build script compiles
+  `c/glibc_compat.c` with weakly linked `__isoc23_strto*` shims so
+  the prebuilt ONNX Runtime links cleanly on glibc < 2.38. On
+  newer systems the strong glibc symbols take precedence and the
+  shim is unused.
 
 ### Changed
 
@@ -80,8 +104,9 @@ For the conventions used to write entries in this file, see
 - Section 18 of the v1 specification now distinguishes performance
   latency targets from retrieval-quality benchmarks, with the latter
   governed by the new benchmarks specification document.
-- Workspace version bumped to `0.1.0-alpha.2`. The CLI's long help
-  text reflects that storage and basic memory commands now work.
+- Workspace version bumped to `0.1.0-alpha.3`. The CLI's long help
+  text reflects that storage, embeddings, and basic memory commands
+  now work.
 
 ### Deprecated
 

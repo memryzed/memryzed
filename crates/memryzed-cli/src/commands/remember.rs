@@ -16,12 +16,15 @@
 //!
 //! Inserts a memory directly. Approved on insert.
 //! Project-scoped memories trigger get-or-create on the project
-//! record for the current working directory.
+//! record for the current working directory. Every insert also
+//! computes and stores an embedding when an active embedder is
+//! configured.
 
 use anyhow::Result;
 
 use memryzed_core::clock::now_epoch_seconds;
-use memryzed_core::memory::{insert, Kind, NewMemory, Scope};
+use memryzed_core::embedder::make_default;
+use memryzed_core::memory::{insert_with_embedder, Kind, NewMemory, Scope};
 use memryzed_core::projects;
 use memryzed_core::Database;
 
@@ -37,7 +40,7 @@ pub struct Args {
 
 pub fn run(ctx: &Context, args: Args) -> Result<()> {
     let data_dir = ctx.data_dir()?;
-    let db = Database::open(&data_dir.db_file())?;
+    let mut db = Database::open(&data_dir.db_file())?;
     let now = now_epoch_seconds();
 
     let scope_id = match args.scope {
@@ -62,11 +65,21 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
     new.pinned = args.pin;
     new.expires_at = args.ttl_days.map(|d| now + i64::from(d) * 86_400);
 
-    let memory = insert(&db, new, now)?;
+    let embedder = make_default(&data_dir.models_dir())?;
+    let memory = insert_with_embedder(&mut db, new, embedder.as_ref(), now)?;
 
     if !ctx.quiet {
         println!("Stored memory {} ({})", memory.id, memory.scope);
         println!("  {}", memory.content);
+        if embedder.is_active() {
+            let dim = embedder
+                .dimension()
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "?".into());
+            println!("  embedding: {} (dim={dim})", embedder.model_id());
+        } else {
+            println!("  embedding: skipped (no active embedder)");
+        }
     }
     Ok(())
 }

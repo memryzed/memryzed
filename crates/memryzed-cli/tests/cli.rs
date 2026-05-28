@@ -18,7 +18,10 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 fn cmd() -> Command {
-    Command::cargo_bin("memryzed").expect("memryzed binary built")
+    let mut c = Command::cargo_bin("memryzed").expect("memryzed binary built");
+    // Tests must never trigger a real model download.
+    c.env("MEMRYZED_DISABLE_EMBEDDING", "1");
+    c
 }
 
 #[test]
@@ -27,7 +30,7 @@ fn version_flag_prints_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.1.0-alpha.2"));
+        .stdout(predicate::str::contains("0.1.0-alpha.3"));
 }
 
 #[test]
@@ -133,7 +136,7 @@ fn doctor_succeeds_after_init() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Database integrity"))
-        .stdout(predicate::str::contains("schema v1"))
+        .stdout(predicate::str::contains("schema v2"))
         .stdout(predicate::str::contains("All systems healthy"));
 }
 
@@ -385,4 +388,53 @@ fn unimplemented_subcommand_fails_with_message() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not yet implemented"));
+}
+
+#[test]
+fn doctor_reports_embedder_skip_when_disabled() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Embedding model"))
+        .stdout(predicate::str::contains("embedder disabled"));
+}
+
+#[test]
+fn remember_announces_skipped_embedding_when_disabled() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("remember")
+        .arg("ephemeral note")
+        .arg("--scope")
+        .arg("global")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Stored memory"))
+        .stdout(predicate::str::contains("embedding: skipped"));
 }

@@ -43,10 +43,7 @@ pub fn run(ctx: &Context) -> Result<()> {
 
     report.section("Memory and integrations");
     report.add(check_database(ctx));
-    report.add(skipped(
-        "Embedding model",
-        "embeddings land in v0.1.0-alpha.3",
-    ));
+    report.add(check_embedder(ctx));
     report.add(skipped(
         "MCP integrations",
         "auto-detect lands in v0.1.0-beta.1",
@@ -232,4 +229,30 @@ fn check_database(ctx: &Context) -> CheckResult {
         Err(err) => return fail("Database integrity", err.to_string()),
     };
     ok("Database integrity", format!("schema v{version}, ok"))
+}
+
+fn check_embedder(ctx: &Context) -> CheckResult {
+    let dir = match ctx.data_dir() {
+        Ok(d) => d,
+        Err(err) => return fail("Embedding model", err.to_string()),
+    };
+    if std::env::var(memryzed_core::embedder::ENV_DISABLE).is_ok() {
+        return skipped(
+            "Embedding model",
+            format!(
+                "{}=1; embedder disabled",
+                memryzed_core::embedder::ENV_DISABLE
+            ),
+        );
+    }
+    match memryzed_core::embedder::make_default(&dir.models_dir()) {
+        Ok(e) => {
+            let dim = e
+                .dimension()
+                .map(|d| d.to_string())
+                .unwrap_or_else(|| "?".into());
+            ok("Embedding model", format!("{} (dim={dim})", e.model_id()))
+        }
+        Err(err) => fail("Embedding model", err.to_string()),
+    }
 }

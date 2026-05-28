@@ -124,7 +124,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         | Command::Export
         | Command::Import { .. } => Err(exit::Coded::new(
             exit::GENERAL_ERROR,
-            "this command is not yet implemented in v0.1.0-alpha.2",
+            "this command is not yet implemented in v0.1.0-alpha.3",
         )
         .into()),
     }

@@ -36,9 +36,9 @@ Memryzed runs as a local MCP server. Any MCP-aware client (Claude Code,
 Kiro, Codex, Cursor, Copilot CLI, Continue) can use it for durable
 memory and resumable session state.
 
-This is a pre-release build. Storage and CLI memory commands work;
-embeddings, hybrid retrieval, and the MCP server arrive in subsequent
-alphas. See https://memryzed.com for the roadmap.";
+This is a pre-release build. Storage, embeddings, and CLI memory
+commands work; hybrid retrieval and the MCP server arrive in
+subsequent alphas. See https://memryzed.com for the roadmap.";
 
 /// Top-level CLI definition.
 #[derive(Debug, Parser)]

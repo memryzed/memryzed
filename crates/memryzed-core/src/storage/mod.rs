@@ -141,7 +141,13 @@ mod tests {
             .filter_map(|r| r.ok())
             .filter(|n: &String| !n.starts_with("sqlite_"))
             .collect();
-        for required in ["memories", "projects", "recall_log", "meta"] {
+        for required in [
+            "memories",
+            "memory_embeddings",
+            "projects",
+            "recall_log",
+            "meta",
+        ] {
             assert!(
                 names.iter().any(|n| n == required),
                 "table {required:?} missing; got {names:?}"
