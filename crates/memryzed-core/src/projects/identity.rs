@@ -171,9 +171,9 @@ mod tests {
 
     #[test]
     fn ssh_and_https_have_distinct_normalized_forms() {
-        // We don't claim full equivalence between SSH and HTTPS in
-        // v0.1.0; that requires parsing the path. They normalize to
-        // distinct strings for now.
+        // SSH and HTTPS remotes for the same repo are not treated as
+        // equivalent; that would require parsing the path. They
+        // normalize to distinct strings.
         let ssh = normalize_remote("git@github.com:memryzed/memryzed.git");
         let https = normalize_remote("https://github.com/memryzed/memryzed.git");
         assert_ne!(ssh, https);

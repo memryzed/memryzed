@@ -14,16 +14,8 @@
 
 //! MCP server for Memryzed.
 //!
-//! v0.1.0-alpha.5 wires four of the eight tools from
-//! `docs/mcp-reference.md`:
-//!
-//! - `recall` — hybrid retrieval over stored memories.
-//! - `remember` — write a new memory.
-//! - `forget` — archive a memory by id.
-//! - `list_memories` — list memories without retrieval ranking.
-//!
-//! Sessions, project auto-detection, and the remaining tools land in
-//! later releases.
+//! Exposes the Memryzed tools to MCP-aware clients over stdio. The
+//! tool surface is documented in `docs/mcp-reference.md`.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -179,16 +171,13 @@ impl MemryzedServer {
         let scope = parse_scope(&args.scope)?;
         if scope == Scope::Session {
             return Err(McpError::invalid_params(
-                "session-scoped memories require an active session; sessions land in v0.2.0",
+                "session-scoped memories require an active session; use the checkpoint tool",
                 None,
             ));
         }
-        // v0.1.0-alpha.5 supports global memories via remember; project
-        // scope requires a project id which the caller must supply later
-        // as the project-tools layer lands.
         if scope == Scope::Project && args.scope_id.is_none() {
             return Err(McpError::invalid_params(
-                "project-scoped remember requires scope_id; project auto-detect lands in beta.1",
+                "project-scoped remember requires a scope_id",
                 None,
             ));
         }

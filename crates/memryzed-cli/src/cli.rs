@@ -14,16 +14,7 @@
 
 //! Command-line interface tree for the `memryzed` binary.
 //!
-//! v0.1.0-alpha.1 wires the full command tree from `docs/cli-reference.md`
-//! but most subcommands return a "not yet implemented" error. The
-//! commands that are wired for real in this alpha are:
-//!
-//! - `memryzed --version`
-//! - `memryzed --help`
-//! - `memryzed init`
-//! - `memryzed doctor`
-//!
-//! Subsequent alphas fill in the rest, one slice per release.
+//! The command surface is documented in `docs/cli-reference.md`.
 
 use std::path::PathBuf;
 
@@ -34,11 +25,7 @@ Memryzed: persistent memory and session state for AI coding agents.
 
 Memryzed runs as a local MCP server. Any MCP-aware client (Claude Code,
 Kiro, Codex, Cursor, Copilot CLI, Continue) can use it for durable
-memory and resumable session state.
-
-This is a pre-release build. Storage, embeddings, and CLI memory
-commands work; hybrid retrieval and the MCP server arrive in
-subsequent alphas. See https://memryzed.com for the roadmap.";
+memory and resumable session state. See https://memryzed.com.";
 
 /// Top-level CLI definition.
 #[derive(Debug, Parser)]
@@ -76,11 +63,6 @@ pub struct Cli {
 }
 
 /// Every subcommand the CLI supports.
-///
-/// Subcommands not yet implemented in v0.1.0-alpha.1 return a clear
-/// "not yet implemented" error. They are still wired here so users
-/// discover them through `--help` and so the CLI tree shape is
-/// stable from the start.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Initialize the data directory and configuration.

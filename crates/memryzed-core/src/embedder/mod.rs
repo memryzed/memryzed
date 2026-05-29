@@ -14,9 +14,9 @@
 
 //! Embedding generation.
 //!
-//! v0.1.0-alpha.3 ships [`FastembedEmbedder`] backed by `fastembed-rs`
-//! with the BGE-small-en-v1.5 model (384-dimensional output). Tests
-//! and CI use [`NoopEmbedder`] via the `MEMRYZED_DISABLE_EMBEDDING`
+//! [`FastembedEmbedder`] is backed by `fastembed-rs` with the
+//! BGE-small-en-v1.5 model (384-dimensional output). Tests and CI
+//! use [`NoopEmbedder`] via the `MEMRYZED_DISABLE_EMBEDDING`
 //! environment variable so no network or model download is required.
 //!
 //! The model identifier reported by [`Embedder::model_id`] becomes

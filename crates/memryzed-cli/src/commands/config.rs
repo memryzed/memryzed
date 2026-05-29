@@ -16,10 +16,9 @@
 //!
 //! Reads and writes `~/.memryzed/config.toml`. The config is treated
 //! as a generic TOML document; dotted keys address nested tables
-//! (for example `memory.auto_approve_threshold`). v0.1.0-beta.1 keeps
-//! this deliberately schema-light: it does not validate that a key is
-//! one Memryzed recognizes, so users can stage settings ahead of the
-//! features that consume them.
+//! (for example `memory.auto_approve_threshold`). It is deliberately
+//! schema-light: it does not validate that a key is one Memryzed
+//! recognizes, so users can stage settings freely.
 
 use std::process::Command;
 

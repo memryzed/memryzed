@@ -16,12 +16,8 @@
 //!
 //! Append-only JSONL at `<data_dir>/audit.log`. Every state-changing
 //! operation writes one line. The format is documented in
-//! `docs/data-model.md`.
-//!
-//! v0.1.0-beta.1 implements the file format and the reader (used by
-//! `memryzed log`). Wiring the CLI write path through every state
-//! transition lands incrementally; for now the MCP server logs its
-//! own events here.
+//! `docs/data-model.md`. This module implements the writer and the
+//! reader used by `memryzed log`.
 
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write};

@@ -14,11 +14,9 @@
 
 //! `memryzed init` implementation.
 //!
-//! Creates the data directory and writes a default `config.toml`.
+//! Creates the data directory, writes a default `config.toml`,
+//! initializes the database, and downloads the embedding model.
 //! Idempotent: a second `init` does not overwrite existing files.
-//!
-//! The full v1 spec calls for downloading the embedding model here.
-//! That step is added in v0.1.0-alpha.3 when the embedder lands.
 
 use std::fs;
 

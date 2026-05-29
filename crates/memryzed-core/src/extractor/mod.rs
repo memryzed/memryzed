@@ -19,9 +19,9 @@
 //! Candidates at or above the configured auto-approve threshold are
 //! stored approved; the rest go to the pending queue for review.
 //!
-//! This is the conservative v1 extractor described in
-//! `docs/specs/v1.md` section 13. The optional Ollama extractor
-//! lands in 0.4.0.
+//! This is the conservative extractor described in
+//! `docs/specs/v1.md` section 13. An optional Ollama-based extractor
+//! is available for richer candidate extraction.
 
 use std::sync::OnceLock;
 

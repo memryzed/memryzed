@@ -53,7 +53,7 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
         Scope::Session => {
             return Err(crate::exit::Coded::new(
                 crate::exit::GENERAL_ERROR,
-                "session-scoped memories require an active session; sessions land in v0.2.0",
+                "session-scoped memories require an active session",
             )
             .into());
         }

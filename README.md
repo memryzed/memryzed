@@ -110,3 +110,9 @@ propose changes. By participating in this project you agree to the
 
 To report a vulnerability, follow the process in `SECURITY.md`. Do not open
 public issues for security reports.
+
+## Authors
+
+Memryzed was created by Hamza Arjah, founder and lead maintainer. See
+`AUTHORS` for the full attribution and the repository's contributors
+page for everyone who has contributed.

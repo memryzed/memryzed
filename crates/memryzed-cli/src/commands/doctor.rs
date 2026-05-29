@@ -14,10 +14,9 @@
 
 //! `memryzed doctor` implementation.
 //!
-//! Runs a series of checks and prints a summary. v0.1.0-alpha.1
-//! covers the binary-level checks: version, executable location,
-//! data directory, configuration file. Database, embedding model,
-//! and integration checks are added as those features land.
+//! Runs a series of health checks and prints a summary: binary
+//! location and version, data directory and configuration, database
+//! integrity, embedding model, and per-client MCP integrations.
 
 use std::env;
 

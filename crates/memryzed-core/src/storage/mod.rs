@@ -33,8 +33,8 @@ pub use migrations::current_schema_version;
 
 /// A handle to the Memryzed SQLite database.
 ///
-/// Currently a thin wrapper around a single connection. Concurrency
-/// for the MCP server is added when the server lands in alpha.5.
+/// A thin wrapper around a single connection. The MCP server
+/// serializes access behind an async mutex.
 pub struct Database {
     conn: Connection,
 }

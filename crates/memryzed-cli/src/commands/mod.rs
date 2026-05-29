@@ -40,8 +40,6 @@ use crate::exit;
 /// Resolve subcommand and run it.
 ///
 /// When no subcommand is supplied, prints help and returns success.
-/// Subcommands not yet implemented in the running alpha return an
-/// error of kind [`crate::exit::Coded`] with a clear message.
 pub fn dispatch(cli: Cli) -> Result<()> {
     let Some(command) = cli.command else {
         // No subcommand: print help and exit zero.
@@ -203,10 +201,8 @@ pub struct Context {
     pub quiet: bool,
     /// True when `--json` is set.
     ///
-    /// Reserved for the commands that produce machine-readable output
-    /// (`list`, `search`, `show`, `log`, `export`). Those land in
-    /// later alphas; for now the field exists so the CLI parses the
-    /// flag and rejects misuse correctly.
+    /// Reserved for commands that produce machine-readable output
+    /// (`list`, `search`, `show`, `log`, `export`).
     #[allow(dead_code)]
     pub json: bool,
 }

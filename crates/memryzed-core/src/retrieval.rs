@@ -25,11 +25,10 @@
 //! Pinned memories receive a small additive boost so they sort above
 //! equally-scored unpinned items.
 //!
-//! v0.1.0-alpha.4 ships the in-Rust pipeline with an embedding-model
-//! filter (only memories embedded with the active model take the
-//! vector path). When sqlite-vec is adopted in a later release the
-//! vector lookup migrates to a virtual table; the public API here
-//! does not change.
+//! The vector leg filters on the active embedding model, so only
+//! memories embedded with the current model take the vector path.
+//! Cosine similarity is computed in Rust over the stored embedding
+//! BLOBs; the public API does not depend on that choice.
 
 use std::collections::HashMap;
 

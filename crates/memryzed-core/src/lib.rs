@@ -14,9 +14,8 @@
 
 //! Core library for Memryzed.
 //!
-//! This crate is the foundation: it owns the data directory layout,
-//! storage, projects, memory, and (in later alphas) retrieval and
-//! sessions.
+//! The foundation crate: data directory layout, storage, projects,
+//! memory, retrieval, sessions, the extractor, and the embedder.
 //!
 //! See `docs/architecture.md` for the architecture and
 //! `docs/data-model.md` for the schema.

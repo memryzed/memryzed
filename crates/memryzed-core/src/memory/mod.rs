@@ -14,10 +14,9 @@
 
 //! Memory records and CRUD.
 //!
-//! v0.1.0-alpha.2 supports the basic lifecycle: insert (always
-//! `Approved` for explicit user input), look up by ID, list by
-//! scope, and archive (`forget`). Embeddings, FTS, retrieval, and
-//! the pending review queue land in subsequent alphas.
+//! Covers the memory lifecycle: insert (direct user input is
+//! `Approved`, or `Pinned` when pinned), pending-queue insert and
+//! approval, lookup by ID, scoped listing, and archive (`forget`).
 
 mod kind;
 mod scope;
@@ -145,8 +144,7 @@ fn validate_new(new: &NewMemory) -> Result<()> {
 ///
 /// Direct user inserts (this entry point) are stored with status
 /// `Pinned` when `pinned` is true and `Approved` otherwise. The
-/// extractor's pending-queue path will use a different entry point
-/// in a later alpha.
+/// extractor's pending-queue path uses `insert_pending` instead.
 pub fn insert(db: &Database, new: NewMemory, now: i64) -> Result<Memory> {
     validate_new(&new)?;
     let id = new_memory_id();
