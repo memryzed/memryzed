@@ -23,6 +23,7 @@ mod install;
 mod list;
 mod log;
 mod remember;
+mod review;
 mod search;
 mod serve;
 mod sessions;
@@ -185,7 +186,9 @@ pub fn dispatch(cli: Cli) -> Result<()> {
 
         Command::EndSession { id } => sessions::end_session(&context, id),
 
-        Command::Update { .. } | Command::Review => Err(exit::Coded::new(
+        Command::Review => review::run(&context),
+
+        Command::Update { .. } => Err(exit::Coded::new(
             exit::GENERAL_ERROR,
             "this command is not yet implemented in this build",
         )

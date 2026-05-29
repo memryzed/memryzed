@@ -25,6 +25,7 @@ hex.workspace = true
 rand.workspace = true
 time.workspace = true
 fastembed.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

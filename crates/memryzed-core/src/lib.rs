@@ -29,6 +29,7 @@ pub mod clock;
 pub mod embedder;
 pub mod error;
 pub mod export;
+pub mod extractor;
 pub mod id;
 pub mod integrations;
 pub mod memory;

@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.78"
 license = "Apache-2.0"
@@ -21,9 +21,9 @@ categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
 # Internal
-memryzed-core = { path = "crates/memryzed-core", version = "0.2.0" }
-memryzed-mcp = { path = "crates/memryzed-mcp", version = "0.2.0" }
-memryzed-tui = { path = "crates/memryzed-tui", version = "0.2.0" }
+memryzed-core = { path = "crates/memryzed-core", version = "0.3.0" }
+memryzed-mcp = { path = "crates/memryzed-mcp", version = "0.3.0" }
+memryzed-tui = { path = "crates/memryzed-tui", version = "0.3.0" }
 
 # External
 anyhow = "1.0"
@@ -44,6 +44,9 @@ time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde"
 fastembed = { version = "5", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
 rmcp = { version = "1", default-features = false, features = ["server", "macros", "schemars", "transport-io"] }
 schemars = "1"
+regex = "1"
+ratatui = "0.28"
+crossterm = "0.28"
 
 # Test-only
 tempfile = "3.10"

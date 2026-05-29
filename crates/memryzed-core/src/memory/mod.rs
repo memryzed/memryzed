@@ -269,6 +269,100 @@ pub fn archive(db: &Database, id: &str, now: i64) -> Result<Memory> {
     get_by_id(db, id)?.ok_or_else(|| Error::memory_not_found(id.to_string()))
 }
 
+/// Insert a memory in `pending` status, awaiting user review.
+///
+/// Used by the extractor for proposed memories below the
+/// auto-approve threshold. No embedding is written until the memory
+/// is approved (see [`approve`]).
+pub fn insert_pending(db: &Database, new: NewMemory, now: i64) -> Result<Memory> {
+    validate_new(&new)?;
+    let id = new_memory_id();
+    db.conn().execute(
+        "INSERT INTO memories (
+            id, scope_kind, scope_id, content, kind, source_turn_id, source_client,
+            status, created_at, updated_at, expires_at, pinned, confidence, embedding_model
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?8, ?9, 0, ?10, NULL)",
+        params![
+            id,
+            new.scope.as_db_str(),
+            new.scope_id,
+            new.content,
+            new.kind.as_db_str(),
+            new.source_turn_id,
+            new.source_client,
+            now,
+            new.expires_at,
+            new.confidence,
+        ],
+    )?;
+    get_by_id(db, &id)?.ok_or_else(|| Error::memory_not_found(id))
+}
+
+/// Approve a pending memory, computing and storing its embedding.
+///
+/// Transitions status to `approved` (or `pinned` when `pin` is set)
+/// and writes the embedding in the same transaction. A no-op if the
+/// memory is already approved.
+pub fn approve(
+    db: &mut Database,
+    id: &str,
+    pin: bool,
+    embedder: &dyn crate::embedder::Embedder,
+    now: i64,
+) -> Result<Memory> {
+    let memory = get_by_id(db, id)?.ok_or_else(|| Error::memory_not_found(id.to_string()))?;
+    let status = if pin {
+        Status::Pinned
+    } else {
+        Status::Approved
+    };
+
+    let embedding = embedder.embed(&[memory.content.as_str()])?;
+    let embedding_vec = embedding.into_iter().next().unwrap_or_default();
+    let store_embedding = !embedding_vec.is_empty() && embedder.is_active();
+
+    let tx = db.conn_mut().transaction()?;
+    tx.execute(
+        "UPDATE memories SET status = ?1, pinned = ?2, updated_at = ?3, embedding_model = ?4
+          WHERE id = ?5",
+        params![
+            status.as_db_str(),
+            i64::from(pin),
+            now,
+            if store_embedding {
+                Some(embedder.model_id())
+            } else {
+                None
+            },
+            id,
+        ],
+    )?;
+    if store_embedding {
+        let dim = embedding_vec.len() as i64;
+        let bytes = embedding_to_bytes(&embedding_vec);
+        tx.execute(
+            "INSERT OR REPLACE INTO memory_embeddings (memory_id, model, dim, embedding)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, embedder.model_id(), dim, bytes],
+        )?;
+    }
+    tx.commit()?;
+    get_by_id(db, id)?.ok_or_else(|| Error::memory_not_found(id.to_string()))
+}
+
+/// List pending memories awaiting review, oldest first.
+pub fn list_pending(db: &Database, limit: Option<u32>) -> Result<Vec<Memory>> {
+    list(
+        db,
+        &ListFilter {
+            scope: None,
+            scope_id: None,
+            statuses: vec![Status::Pending],
+            limit,
+        },
+    )
+}
+
 /// Permanently delete a memory. Used by `forget --hard` only.
 pub fn delete(db: &Database, id: &str) -> Result<()> {
     let updated = db
@@ -676,5 +770,59 @@ mod tests {
         assert_eq!(bytes.len(), original.len() * 4);
         let restored = bytes_to_embedding(&bytes).unwrap();
         assert_eq!(restored, original);
+    }
+
+    #[test]
+    fn insert_pending_creates_pending_memory_without_embedding() {
+        let db = fresh_db();
+        let mut new = NewMemory::new(Scope::Global, "Prefers pnpm over npm");
+        new.kind = Kind::Preference;
+        new.confidence = Some(0.95);
+        let m = insert_pending(&db, new, 100).unwrap();
+        assert_eq!(m.status, Status::Pending);
+        assert!(get_embedding(&db, &m.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn pending_memories_are_excluded_from_retrieval_status_default() {
+        let db = fresh_db();
+        insert_pending(&db, NewMemory::new(Scope::Global, "pending one"), 100).unwrap();
+        let approved = list(
+            &db,
+            &ListFilter {
+                statuses: vec![Status::Approved, Status::Pinned],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(approved.is_empty());
+        let pending = list_pending(&db, None).unwrap();
+        assert_eq!(pending.len(), 1);
+    }
+
+    #[test]
+    fn approve_transitions_status_and_writes_embedding() {
+        let mut db = fresh_db();
+        let m = insert_pending(&db, NewMemory::new(Scope::Global, "abcd"), 100).unwrap();
+        let approved = approve(&mut db, &m.id, false, &DeterministicEmbedder, 200).unwrap();
+        assert_eq!(approved.status, Status::Approved);
+        assert_eq!(approved.updated_at, 200);
+        assert!(get_embedding(&db, &m.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn approve_with_pin_sets_pinned_status() {
+        let mut db = fresh_db();
+        let m = insert_pending(&db, NewMemory::new(Scope::Global, "abcd"), 100).unwrap();
+        let approved = approve(&mut db, &m.id, true, &DeterministicEmbedder, 200).unwrap();
+        assert_eq!(approved.status, Status::Pinned);
+        assert!(approved.pinned);
+    }
+
+    #[test]
+    fn approve_unknown_id_is_not_found() {
+        let mut db = fresh_db();
+        let err = approve(&mut db, "mem_nope", false, &crate::NoopEmbedder, 0).unwrap_err();
+        assert!(matches!(err, Error::NotFound { kind: "memory", .. }));
     }
 }

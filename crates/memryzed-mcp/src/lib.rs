@@ -45,7 +45,7 @@ use memryzed_core::memory::{
     Scope, Status,
 };
 use memryzed_core::retrieval::{search as retrieval_search, SearchOptions};
-use memryzed_core::{projects, sessions, Database};
+use memryzed_core::{extractor, projects, sessions, Database};
 
 /// State shared across every tool call.
 ///
@@ -388,6 +388,70 @@ impl MemryzedServer {
             &payload,
         )?)]))
     }
+
+    /// Extract candidate memories from a message.
+    #[tool(
+        description = "Scan a user message for facts and preferences. High-confidence candidates are stored; the rest are queued for review."
+    )]
+    async fn extract_from(
+        &self,
+        Parameters(args): Parameters<ExtractArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let candidates = extractor::extract(&args.message);
+        let threshold = args.auto_approve_threshold.unwrap_or(0.85);
+        let project_id = self.inner.project_id.lock().await.clone();
+
+        let now = now_epoch_seconds();
+        let mut db = self.inner.db.lock().await;
+        let mut stored = Vec::new();
+        for cand in candidates {
+            // Project-scoped candidates need a project; fall back to
+            // global when the server has no project context.
+            let (scope, scope_id) = match cand.scope {
+                Scope::Project => match &project_id {
+                    Some(pid) => (Scope::Project, Some(pid.clone())),
+                    None => (Scope::Global, None),
+                },
+                other => (other, None),
+            };
+            let mut new = NewMemory::new(scope, cand.content.clone());
+            new.scope_id = scope_id;
+            new.kind = cand.kind;
+            new.confidence = Some(cand.confidence);
+            new.source_client = args.client.clone();
+
+            if cand.confidence >= threshold {
+                let m = insert_with_embedder(&mut db, new, self.inner.embedder.as_ref(), now)
+                    .map_err(core_to_mcp)?;
+                stored.push(ExtractHit {
+                    id: m.id,
+                    content: m.content,
+                    status: m.status.as_db_str().to_string(),
+                    confidence: cand.confidence,
+                });
+            } else {
+                let m =
+                    memryzed_core::memory::insert_pending(&db, new, now).map_err(core_to_mcp)?;
+                stored.push(ExtractHit {
+                    id: m.id,
+                    content: m.content,
+                    status: m.status.as_db_str().to_string(),
+                    confidence: cand.confidence,
+                });
+            }
+        }
+        drop(db);
+
+        let approved = stored.iter().filter(|h| h.status != "pending").count();
+        let pending = stored.len() - approved;
+        let payload = ExtractResponse {
+            summary: format!("Memryzed: {approved} stored, {pending} queued for review"),
+            candidates: stored,
+        };
+        Ok(CallToolResult::success(vec![Content::text(json_string(
+            &payload,
+        )?)]))
+    }
 }
 
 #[tool_handler]
@@ -489,6 +553,18 @@ struct EndSessionArgs {
     session_id: String,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ExtractArgs {
+    /// The user message to scan for facts and preferences.
+    message: String,
+    /// Confidence threshold for auto-approval. Default 0.85.
+    #[serde(default)]
+    auto_approve_threshold: Option<f64>,
+    /// Originating client identifier, recorded on stored memories.
+    #[serde(default)]
+    client: Option<String>,
+}
+
 // ------------------------ response types ------------------------
 
 #[derive(Debug, Serialize)]
@@ -575,6 +651,20 @@ struct SessionSummary {
     title: Option<String>,
     status: String,
     updated_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct ExtractResponse {
+    candidates: Vec<ExtractHit>,
+    summary: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ExtractHit {
+    id: String,
+    content: String,
+    status: String,
+    confidence: f64,
 }
 
 fn memory_summary(m: &Memory) -> MemorySummary {
@@ -858,5 +948,58 @@ mod tests {
             .unwrap_err();
         let msg = format!("{err:?}").to_lowercase();
         assert!(msg.contains("project"));
+    }
+
+    #[tokio::test]
+    async fn extract_from_auto_approves_high_confidence() {
+        let server = fresh_server();
+        let r = server
+            .extract_from(Parameters(ExtractArgs {
+                message: "remember that I deploy with cargo-dist".into(),
+                auto_approve_threshold: None,
+                client: Some("kiro".into()),
+            }))
+            .await
+            .unwrap();
+        let v = parse_text(&r);
+        let cands = v["candidates"].as_array().unwrap();
+        assert_eq!(cands.len(), 1);
+        // "remember that ..." is confidence 1.0 -> approved + stored.
+        assert_eq!(cands[0]["status"], "approved");
+        assert!(v["summary"].as_str().unwrap().contains("1 stored"));
+    }
+
+    #[tokio::test]
+    async fn extract_from_queues_below_threshold() {
+        let server = fresh_server();
+        // Force everything to the pending queue with a threshold of 1.01.
+        let r = server
+            .extract_from(Parameters(ExtractArgs {
+                message: "I prefer pnpm over npm".into(),
+                auto_approve_threshold: Some(1.01),
+                client: None,
+            }))
+            .await
+            .unwrap();
+        let v = parse_text(&r);
+        let cands = v["candidates"].as_array().unwrap();
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0]["status"], "pending");
+        assert!(v["summary"].as_str().unwrap().contains("1 queued"));
+    }
+
+    #[tokio::test]
+    async fn extract_from_no_match_stores_nothing() {
+        let server = fresh_server();
+        let r = server
+            .extract_from(Parameters(ExtractArgs {
+                message: "what time is it".into(),
+                auto_approve_threshold: None,
+                client: None,
+            }))
+            .await
+            .unwrap();
+        let v = parse_text(&r);
+        assert_eq!(v["candidates"].as_array().unwrap().len(), 0);
     }
 }

@@ -30,7 +30,7 @@ fn version_flag_prints_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.2.0"));
+        .stdout(predicate::str::contains("0.3.0"));
 }
 
 #[test]
@@ -413,7 +413,7 @@ fn sessions_empty_then_resume_reports_none() {
 #[test]
 fn unimplemented_subcommand_fails_with_message() {
     cmd()
-        .arg("review")
+        .arg("update")
         .assert()
         .failure()
         .stderr(predicate::str::contains("not yet implemented"));

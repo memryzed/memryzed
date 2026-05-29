@@ -34,7 +34,32 @@ For the conventions used to write entries in this file, see
 
 (none)
 
-## [0.2.0] - 2026-05-29
+## [0.3.0] - 2026-05-29
+
+### Added
+
+- Rule-based extractor (`extractor` core module). Scans a user
+  message for high-signal patterns and proposes candidate memories
+  with a confidence score: explicit "remember that ..." and
+  "don't forget ..." (confidence 1.0), "I prefer X over Y" (0.95),
+  "I always/usually/never use X" (0.9), "this repo uses X" and
+  "the deploy/build/test/lint command is X" (0.9, project scope).
+- Pending queue. New `memory::insert_pending` stores a memory in
+  `pending` status without an embedding; `memory::approve`
+  transitions it to approved or pinned and writes the embedding in
+  one transaction; `memory::list_pending` lists the queue.
+- New `extract_from` MCP tool. Runs the extractor over a message,
+  auto-approves candidates at or above the configured threshold
+  (default 0.85), and queues the rest for review. Brings the MCP
+  surface to nine tools.
+- Review TUI (`memryzed-tui`, built on ratatui and crossterm) and
+  the `memryzed review` command. Walks the pending queue with
+  approve (a), approve and pin (p), reject (r), and navigation
+  keys; shows per-candidate detail and a running status line.
+
+### Changed
+
+- The MCP server now exposes nine tools (added `extract_from`).
 
 ### Added
 

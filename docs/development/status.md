@@ -7,7 +7,7 @@ decision changes.
 
 ## Version
 
-`0.2.0` (local git only; not yet tagged publicly).
+`0.3.0` (local git only; not yet tagged publicly).
 publicly yet).
 
 ## Where the code lives
@@ -40,7 +40,7 @@ else is planned but not implemented.
 | `memryzed install`            | done   | beta.1    |
 | `memryzed uninstall`          | done   | beta.1    |
 | `memryzed update`             | todo   | later     |
-| `memryzed review` (TUI)       | todo   | 0.3.0     |
+| `memryzed review` (TUI)       | done   | 0.3.0     |
 | `memryzed sessions`           | done   | 0.2.0     |
 | `memryzed resume`             | done   | 0.2.0     |
 | `memryzed log`                | done   | beta.1    |
