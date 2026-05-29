@@ -25,6 +25,7 @@ mod log;
 mod remember;
 mod search;
 mod serve;
+mod sessions;
 mod show;
 
 use anyhow::Result;
@@ -178,13 +179,17 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             data::import(&context, data::ImportArgs { file, dry_run, yes })
         }
 
-        Command::Update { .. } | Command::Review | Command::Sessions | Command::Resume { .. } => {
-            Err(exit::Coded::new(
-                exit::GENERAL_ERROR,
-                "this command is not yet implemented in this build",
-            )
-            .into())
-        }
+        Command::Sessions { limit } => sessions::list(&context, limit),
+
+        Command::Resume { id, json } => sessions::resume(&context, id, json),
+
+        Command::EndSession { id } => sessions::end_session(&context, id),
+
+        Command::Update { .. } | Command::Review => Err(exit::Coded::new(
+            exit::GENERAL_ERROR,
+            "this command is not yet implemented in this build",
+        )
+        .into()),
     }
 }
 

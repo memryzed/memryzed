@@ -35,6 +35,7 @@ pub mod memory;
 pub mod paths;
 pub mod projects;
 pub mod retrieval;
+pub mod sessions;
 pub mod storage;
 pub mod version;
 

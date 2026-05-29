@@ -147,6 +147,7 @@ mod tests {
             "memory_fts",
             "projects",
             "recall_log",
+            "sessions",
             "meta",
         ] {
             assert!(

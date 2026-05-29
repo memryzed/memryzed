@@ -45,7 +45,7 @@ use memryzed_core::memory::{
     Scope, Status,
 };
 use memryzed_core::retrieval::{search as retrieval_search, SearchOptions};
-use memryzed_core::Database;
+use memryzed_core::{projects, sessions, Database};
 
 /// State shared across every tool call.
 ///
@@ -62,6 +62,9 @@ pub struct MemryzedServer {
 struct Inner {
     db: Mutex<Database>,
     embedder: Arc<dyn Embedder>,
+    /// Project id for the working directory the server was launched
+    /// in. Resolved once at startup; session tools operate on it.
+    project_id: Mutex<Option<String>>,
 }
 
 impl MemryzedServer {
@@ -74,10 +77,18 @@ impl MemryzedServer {
     pub fn open(data_dir: &memryzed_core::DataDir) -> anyhow::Result<Self> {
         let db = Database::open(&data_dir.db_file())?;
         let embedder = make_default(&data_dir.models_dir())?;
+        // Resolve the project for the current working directory and
+        // record it, so session tools have a scope without the agent
+        // needing to pass one.
+        let project_id = std::env::current_dir()
+            .ok()
+            .and_then(|cwd| projects::ensure_for_cwd(&db, &cwd, now_epoch_seconds()).ok())
+            .map(|p| p.id);
         Ok(Self {
             inner: Arc::new(Inner {
                 db: Mutex::new(db),
                 embedder,
+                project_id: Mutex::new(project_id),
             }),
             tool_router: Self::tool_router(),
         })
@@ -89,9 +100,25 @@ impl MemryzedServer {
             inner: Arc::new(Inner {
                 db: Mutex::new(db),
                 embedder,
+                project_id: Mutex::new(None),
             }),
             tool_router: Self::tool_router(),
         }
+    }
+
+    /// Test helper: set the active project id.
+    #[doc(hidden)]
+    pub async fn set_project_for_test(&self, project_id: impl Into<String>) {
+        *self.inner.project_id.lock().await = Some(project_id.into());
+    }
+
+    async fn require_project(&self) -> Result<String, McpError> {
+        self.inner.project_id.lock().await.clone().ok_or_else(|| {
+            McpError::invalid_params(
+                "no project for the current working directory; sessions require a project",
+                None,
+            )
+        })
     }
 }
 
@@ -238,6 +265,129 @@ impl MemryzedServer {
             &payload,
         )?)]))
     }
+
+    /// Save the current task's session state for this project.
+    #[tool(
+        description = "Save the current task's working state for this project. Creates or updates the active session."
+    )]
+    async fn checkpoint(
+        &self,
+        Parameters(args): Parameters<CheckpointArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let project_id = self.require_project().await?;
+        let state = args.state.unwrap_or(serde_json::Value::Null);
+        let db = self.inner.db.lock().await;
+        let session =
+            sessions::checkpoint(&db, &project_id, args.title, state, now_epoch_seconds())
+                .map_err(core_to_mcp)?;
+        drop(db);
+        let payload = SessionResponse {
+            session_id: session.id,
+            status: session.status.as_db_str().to_string(),
+            summary: "Memryzed: checkpointed session".into(),
+        };
+        Ok(CallToolResult::success(vec![Content::text(json_string(
+            &payload,
+        )?)]))
+    }
+
+    /// Load a session's state for this project.
+    #[tool(
+        description = "Load a session. Without an id, resumes the most recent session for this project."
+    )]
+    async fn resume(
+        &self,
+        Parameters(args): Parameters<ResumeArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let db = self.inner.db.lock().await;
+        let session = match args.session_id {
+            Some(id) => sessions::get_by_id(&db, &id).map_err(core_to_mcp)?,
+            None => {
+                let project_id = self.require_project().await?;
+                sessions::resume_latest(&db, &project_id).map_err(core_to_mcp)?
+            }
+        };
+        drop(db);
+
+        match session {
+            Some(s) => {
+                let payload = ResumeResponse {
+                    session: Some(SessionDetail {
+                        id: s.id,
+                        title: s.title,
+                        project_id: s.project_id,
+                        status: s.status.as_db_str().to_string(),
+                        state: s.state,
+                        created_at: s.created_at,
+                        updated_at: s.updated_at,
+                    }),
+                    summary: "Memryzed: resumed session".into(),
+                };
+                Ok(CallToolResult::success(vec![Content::text(json_string(
+                    &payload,
+                )?)]))
+            }
+            None => {
+                let payload = ResumeResponse {
+                    session: None,
+                    summary: "Memryzed: no prior sessions in this project".into(),
+                };
+                Ok(CallToolResult::success(vec![Content::text(json_string(
+                    &payload,
+                )?)]))
+            }
+        }
+    }
+
+    /// List sessions for this project.
+    #[tool(description = "List sessions for the current project, most recent first.")]
+    async fn list_sessions(
+        &self,
+        Parameters(args): Parameters<ListSessionsArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let project_id = match args.project_id {
+            Some(p) => p,
+            None => self.require_project().await?,
+        };
+        let db = self.inner.db.lock().await;
+        let list = sessions::list(&db, &project_id, Some(args.limit.unwrap_or(10).max(1)))
+            .map_err(core_to_mcp)?;
+        drop(db);
+        let payload = ListSessionsResponse {
+            sessions: list
+                .into_iter()
+                .map(|s| SessionSummary {
+                    id: s.id,
+                    title: s.title,
+                    status: s.status.as_db_str().to_string(),
+                    updated_at: s.updated_at,
+                })
+                .collect(),
+        };
+        Ok(CallToolResult::success(vec![Content::text(json_string(
+            &payload,
+        )?)]))
+    }
+
+    /// Mark a session completed.
+    #[tool(description = "Mark a session completed and stop resuming it.")]
+    async fn end_session(
+        &self,
+        Parameters(args): Parameters<EndSessionArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let db = self.inner.db.lock().await;
+        let session =
+            sessions::end(&db, &args.session_id, now_epoch_seconds()).map_err(core_to_mcp)?;
+        drop(db);
+        let payload = SessionResponse {
+            session_id: session.id,
+            status: session.status.as_db_str().to_string(),
+            summary: "Memryzed: session ended".into(),
+        };
+        Ok(CallToolResult::success(vec![Content::text(json_string(
+            &payload,
+        )?)]))
+    }
 }
 
 #[tool_handler]
@@ -247,10 +397,12 @@ impl ServerHandler for MemryzedServer {
             .with_server_info(Implementation::from_build_env())
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(
-                "Memryzed: persistent memory for AI coding agents. \
-Tools: recall (hybrid search), remember (store), forget (archive), \
-list_memories (transparency). v0.1.0-alpha.5; sessions and project \
-auto-detection land in later releases."
+                "Memryzed: persistent memory and session state for AI coding agents. \
+Memory tools: recall (hybrid search), remember (store), forget \
+(archive), list_memories (transparency). Session tools: checkpoint \
+(save working state), resume (restore most recent or by id), \
+list_sessions, end_session. Sessions are scoped to the project of \
+the working directory."
                     .to_string(),
             )
     }
@@ -303,6 +455,40 @@ struct ListMemoriesArgs {
     limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CheckpointArgs {
+    /// Human-readable title for the session.
+    #[serde(default)]
+    title: Option<String>,
+    /// Opaque working-state object (open files, recent turns, etc.).
+    #[serde(default)]
+    state: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ResumeArgs {
+    /// Session id. If absent, resumes the most recent session for
+    /// the current project.
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ListSessionsArgs {
+    /// Project id. Defaults to the current project.
+    #[serde(default)]
+    project_id: Option<String>,
+    /// Maximum number of results.
+    #[serde(default)]
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct EndSessionArgs {
+    /// Session id to mark completed.
+    session_id: String,
+}
+
 // ------------------------ response types ------------------------
 
 #[derive(Debug, Serialize)]
@@ -352,6 +538,43 @@ struct MemorySummary {
     kind: String,
     pinned: bool,
     created_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionResponse {
+    session_id: String,
+    status: String,
+    summary: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ResumeResponse {
+    session: Option<SessionDetail>,
+    summary: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionDetail {
+    id: String,
+    title: Option<String>,
+    project_id: String,
+    status: String,
+    state: serde_json::Value,
+    created_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct ListSessionsResponse {
+    sessions: Vec<SessionSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionSummary {
+    id: String,
+    title: Option<String>,
+    status: String,
+    updated_at: i64,
 }
 
 fn memory_summary(m: &Memory) -> MemorySummary {
@@ -541,5 +764,99 @@ mod tests {
             .unwrap_err();
         let msg = format!("{err:?}");
         assert!(msg.to_lowercase().contains("scope"));
+    }
+
+    #[tokio::test]
+    async fn checkpoint_then_resume_round_trips() {
+        let server = fresh_server();
+        // Seed a project row so the session FK is satisfiable, then
+        // point the server at it.
+        {
+            let db = server.inner.db.lock().await;
+            let tmp = tempfile::tempdir().unwrap();
+            let p = memryzed_core::projects::ensure_for_cwd(&db, tmp.path(), 100).unwrap();
+            drop(db);
+            server.set_project_for_test(p.id).await;
+        }
+
+        let r = server
+            .checkpoint(Parameters(CheckpointArgs {
+                title: Some("Refactor".into()),
+                state: Some(serde_json::json!({"open_files": ["a.rs"]})),
+            }))
+            .await
+            .unwrap();
+        let cv = parse_text(&r);
+        assert!(cv["session_id"].as_str().unwrap().starts_with("sess_"));
+        assert_eq!(cv["status"], "active");
+
+        let r = server
+            .resume(Parameters(ResumeArgs { session_id: None }))
+            .await
+            .unwrap();
+        let rv = parse_text(&r);
+        assert_eq!(rv["session"]["title"], "Refactor");
+        assert_eq!(rv["session"]["state"]["open_files"][0], "a.rs");
+    }
+
+    #[tokio::test]
+    async fn resume_with_no_sessions_returns_null() {
+        let server = fresh_server();
+        {
+            let db = server.inner.db.lock().await;
+            let tmp = tempfile::tempdir().unwrap();
+            let p = memryzed_core::projects::ensure_for_cwd(&db, tmp.path(), 100).unwrap();
+            drop(db);
+            server.set_project_for_test(p.id).await;
+        }
+        let r = server
+            .resume(Parameters(ResumeArgs { session_id: None }))
+            .await
+            .unwrap();
+        let rv = parse_text(&r);
+        assert!(rv["session"].is_null());
+        assert!(rv["summary"].as_str().unwrap().contains("no prior"));
+    }
+
+    #[tokio::test]
+    async fn end_session_marks_completed() {
+        let server = fresh_server();
+        let pid = {
+            let db = server.inner.db.lock().await;
+            let tmp = tempfile::tempdir().unwrap();
+            let p = memryzed_core::projects::ensure_for_cwd(&db, tmp.path(), 100).unwrap();
+            p.id
+        };
+        server.set_project_for_test(pid).await;
+
+        let r = server
+            .checkpoint(Parameters(CheckpointArgs {
+                title: None,
+                state: None,
+            }))
+            .await
+            .unwrap();
+        let sid = parse_text(&r)["session_id"].as_str().unwrap().to_string();
+
+        let r = server
+            .end_session(Parameters(EndSessionArgs { session_id: sid }))
+            .await
+            .unwrap();
+        assert_eq!(parse_text(&r)["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn session_tools_error_without_project() {
+        let server = fresh_server();
+        // No project set on the test server.
+        let err = server
+            .checkpoint(Parameters(CheckpointArgs {
+                title: None,
+                state: None,
+            }))
+            .await
+            .unwrap_err();
+        let msg = format!("{err:?}").to_lowercase();
+        assert!(msg.contains("project"));
     }
 }

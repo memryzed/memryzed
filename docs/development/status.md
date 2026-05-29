@@ -7,7 +7,7 @@ decision changes.
 
 ## Version
 
-`0.1.0` (local git only; not yet tagged publicly).
+`0.2.0` (local git only; not yet tagged publicly).
 publicly yet).
 
 ## Where the code lives
@@ -41,8 +41,8 @@ else is planned but not implemented.
 | `memryzed uninstall`          | done   | beta.1    |
 | `memryzed update`             | todo   | later     |
 | `memryzed review` (TUI)       | todo   | 0.3.0     |
-| `memryzed sessions`           | todo   | 0.2.0     |
-| `memryzed resume`             | todo   | 0.2.0     |
+| `memryzed sessions`           | done   | 0.2.0     |
+| `memryzed resume`             | done   | 0.2.0     |
 | `memryzed log`                | done   | beta.1    |
 | `memryzed config`             | done   | beta.1    |
 | `memryzed export` / `import`  | done   | beta.1    |
@@ -55,9 +55,9 @@ else is planned but not implemented.
 | `remember`       | done   | alpha.5   |
 | `forget`         | done   | alpha.5   |
 | `list_memories`  | done   | alpha.5   |
-| `checkpoint`     | todo   | 0.2.0     |
-| `resume`         | todo   | 0.2.0     |
-| `list_sessions`  | todo   | 0.2.0     |
+| `checkpoint`     | done   | 0.2.0     |
+| `resume`         | done   | 0.2.0     |
+| `list_sessions`  | done   | 0.2.0     |
 | `end_session`    | todo   | 0.2.0     |
 
 ### Storage

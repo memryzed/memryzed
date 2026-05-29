@@ -34,7 +34,27 @@ For the conventions used to write entries in this file, see
 
 (none)
 
-## [0.1.0] - 2026-05-29
+## [0.2.0] - 2026-05-29
+
+### Added
+
+- Sessions: per-task working state scoped to a project. Migration
+  004 adds the `sessions` table. New `sessions` core module with
+  `checkpoint` (create or update the active session), `resume_latest`
+  (most recent resumable session for a project), `get_by_id`, `list`,
+  and `end` (mark completed).
+- Four new MCP tools: `checkpoint`, `resume`, `list_sessions`, and
+  `end_session`. The server resolves the project for its working
+  directory once at startup, so session tools need no scope argument.
+  `resume` with no id returns the most recent session; with an id it
+  returns that specific one.
+- Three new CLI commands: `memryzed sessions [--limit N]`,
+  `memryzed resume [<id>] [--json]`, and `memryzed end-session <id>`.
+
+### Changed
+
+- Server tool count is now eight. The handshake instructions list
+  both the memory tools and the session tools.
 
 First non-prerelease. Accumulates everything built across the
 0.1.0-alpha and 0.1.0-rc series into one release: a local MCP

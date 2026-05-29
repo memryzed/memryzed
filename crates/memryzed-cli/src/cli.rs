@@ -209,12 +209,28 @@ pub enum Command {
     Review,
 
     /// List sessions for the current project.
-    Sessions,
+    /// List sessions for the current project.
+    Sessions {
+        /// Maximum number of results.
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+    },
 
     /// Print or load a session's state.
     Resume {
         /// Session ID. Defaults to the most recent session.
         id: Option<String>,
+
+        /// Output the full state blob as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Mark a session completed.
+    #[command(name = "end-session")]
+    EndSession {
+        /// Session ID to end.
+        id: String,
     },
 
     /// Run health checks.

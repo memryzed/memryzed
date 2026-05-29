@@ -30,7 +30,7 @@ fn version_flag_prints_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.1.0"));
+        .stdout(predicate::str::contains("0.2.0"));
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn doctor_succeeds_after_init() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Database integrity"))
-        .stdout(predicate::str::contains("schema v3"))
+        .stdout(predicate::str::contains("schema v4"))
         .stdout(predicate::str::contains("All systems healthy"));
 }
 
@@ -379,6 +379,35 @@ fn remember_unknown_scope_returns_misuse() {
         .assert()
         .failure()
         .code(2);
+}
+
+#[test]
+fn sessions_empty_then_resume_reports_none() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("sessions")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No sessions"));
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("resume")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No resumable session"));
 }
 
 #[test]
