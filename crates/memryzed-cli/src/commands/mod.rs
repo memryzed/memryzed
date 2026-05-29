@@ -14,10 +14,14 @@
 
 //! Command dispatch and implementations.
 
+mod config;
+mod data;
 mod doctor;
 mod forget;
 mod init;
+mod install;
 mod list;
+mod log;
 mod remember;
 mod search;
 mod serve;
@@ -136,20 +140,51 @@ pub fn dispatch(cli: Cli) -> Result<()> {
 
         Command::Serve => serve::run(&context),
 
-        Command::Install { .. }
-        | Command::Uninstall { .. }
-        | Command::Update { .. }
-        | Command::Review
-        | Command::Sessions
-        | Command::Resume { .. }
-        | Command::Log { .. }
-        | Command::Config
-        | Command::Export
-        | Command::Import { .. } => Err(exit::Coded::new(
-            exit::GENERAL_ERROR,
-            "this command is not yet implemented in v0.1.0-alpha.5",
-        )
-        .into()),
+        Command::Install { client, print, yes } => {
+            install::install(&context, install::InstallArgs { client, print, yes })
+        }
+
+        Command::Uninstall { purge, unwire, yes } => {
+            install::uninstall(&context, install::UninstallArgs { purge, unwire, yes })
+        }
+
+        Command::Log {
+            follow,
+            tail,
+            client,
+        } => log::run(
+            &context,
+            log::Args {
+                follow,
+                tail,
+                client,
+            },
+        ),
+
+        Command::Config { action } => {
+            use crate::cli::ConfigAction;
+            let action = match action {
+                None => config::Action::Show,
+                Some(ConfigAction::Get { key }) => config::Action::Get { key },
+                Some(ConfigAction::Set { key, value }) => config::Action::Set { key, value },
+                Some(ConfigAction::Edit) => config::Action::Edit,
+            };
+            config::run(&context, action)
+        }
+
+        Command::Export { pretty } => data::export(&context, data::ExportArgs { pretty }),
+
+        Command::Import { file, dry_run, yes } => {
+            data::import(&context, data::ImportArgs { file, dry_run, yes })
+        }
+
+        Command::Update { .. } | Command::Review | Command::Sessions | Command::Resume { .. } => {
+            Err(exit::Coded::new(
+                exit::GENERAL_ERROR,
+                "this command is not yet implemented in v0.1.0-beta.1",
+            )
+            .into())
+        }
     }
 }
 

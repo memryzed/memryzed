@@ -104,6 +104,19 @@ impl DataDir {
     }
 }
 
+/// Resolve the user's home directory.
+///
+/// Returns an error if the home directory cannot be determined.
+pub fn home_dir() -> io::Result<std::path::PathBuf> {
+    if let Some(dirs) = directories::BaseDirs::new() {
+        return Ok(dirs.home_dir().to_path_buf());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "could not determine the user's home directory",
+    ))
+}
+
 #[cfg(unix)]
 fn default_data_dir() -> io::Result<PathBuf> {
     if let Some(home) = directories::BaseDirs::new() {

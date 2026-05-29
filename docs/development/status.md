@@ -7,7 +7,7 @@ decision changes.
 
 ## Version
 
-`0.1.0-alpha.5` (local git only; nothing has been pushed or tagged
+`0.1.0-beta.1` (local git only; nothing has been pushed or tagged
 publicly yet).
 
 ## Where the code lives
@@ -37,15 +37,15 @@ else is planned but not implemented.
 | `memryzed forget <id>`        | done   | alpha.2   |
 | `memryzed search <query>`     | done   | alpha.4   |
 | `memryzed serve` (MCP stdio)  | done   | alpha.5   |
-| `memryzed install`            | todo   | beta.1    |
-| `memryzed uninstall`          | todo   | beta.1    |
+| `memryzed install`            | done   | beta.1    |
+| `memryzed uninstall`          | done   | beta.1    |
 | `memryzed update`             | todo   | later     |
 | `memryzed review` (TUI)       | todo   | 0.3.0     |
 | `memryzed sessions`           | todo   | 0.2.0     |
 | `memryzed resume`             | todo   | 0.2.0     |
-| `memryzed log`                | todo   | beta.1    |
-| `memryzed config`             | todo   | beta.1    |
-| `memryzed export` / `import`  | todo   | beta.1    |
+| `memryzed log`                | done   | beta.1    |
+| `memryzed config`             | done   | beta.1    |
+| `memryzed export` / `import`  | done   | beta.1    |
 
 ### MCP tools (over stdio)
 
@@ -90,11 +90,12 @@ else is planned but not implemented.
 
 ## Test coverage
 
-87 tests pass plus 1 ignored real-model test:
+109 tests pass plus 1 ignored real-model test:
 
-- 16 CLI integration tests (`crates/memryzed-cli/tests/cli.rs`).
-- 65 core unit tests across `clock`, `embedder`, `error`, `id`,
-  `memory`, `paths`, `projects`, `retrieval`, `storage`, `version`.
+- 20 CLI integration tests (`crates/memryzed-cli/tests/cli.rs`).
+- 83 core unit tests across `audit`, `clock`, `embedder`, `error`,
+  `export`, `id`, `integrations`, `memory`, `paths`, `projects`,
+  `retrieval`, `storage`, `version`.
 - 6 MCP tool tests in `memryzed-mcp`.
 - 1 `#[ignore]` test that downloads the real BGE-small model and
   embeds two strings; passes locally.
@@ -109,6 +110,9 @@ CI gate enforced locally and in `.github/workflows/ci.yml`:
 ## Local git history
 
 ```
+(beta.1) feat: v0.1.0-beta.1 client integrations, audit log, config, export/import
+56c0983 fix(docs): correct Kiro CLI MCP config path
+87dd529 docs: add docs/development/status.md as the persistent project checkpoint
 630517a feat: v0.1.0-alpha.5 MCP server (recall, remember, forget, list_memories)
 ac0675b feat: v0.1.0-alpha.4 hybrid retrieval (vector + FTS + recency)
 4700049 feat: v0.1.0-alpha.3 embeddings via fastembed-rs

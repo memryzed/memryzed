@@ -30,7 +30,7 @@ fn version_flag_prints_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.1.0-alpha.5"));
+        .stdout(predicate::str::contains("0.1.0-beta.1"));
 }
 
 #[test]
@@ -388,6 +388,137 @@ fn unimplemented_subcommand_fails_with_message() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not yet implemented"));
+}
+
+#[test]
+fn install_print_emits_a_config_block() {
+    cmd()
+        .arg("install")
+        .arg("--print")
+        .arg("--client")
+        .arg("kiro")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mcpServers"))
+        .stdout(predicate::str::contains("memryzed"))
+        .stdout(predicate::str::contains("serve"));
+}
+
+#[test]
+fn config_set_then_get_round_trips() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("config")
+        .arg("set")
+        .arg("memory.auto_approve_threshold")
+        .arg("0.7")
+        .assert()
+        .success();
+
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("config")
+        .arg("get")
+        .arg("memory.auto_approve_threshold")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0.7"));
+}
+
+#[test]
+fn export_then_import_round_trips_a_memory() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir_a = tmp.path().join("a");
+    let dir_b = tmp.path().join("b");
+    let dump = tmp.path().join("dump.json");
+
+    // Seed store A.
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir_a)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir_a)
+        .arg("remember")
+        .arg("portable fact")
+        .arg("--scope")
+        .arg("global")
+        .assert()
+        .success();
+
+    // Export A to a file.
+    let out = cmd()
+        .arg("--data-dir")
+        .arg(&dir_a)
+        .arg("export")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    std::fs::write(&dump, out).unwrap();
+
+    // Import into fresh store B.
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir_b)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir_b)
+        .arg("import")
+        .arg(&dump)
+        .arg("--yes")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("new memories"));
+
+    // B now lists the fact.
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir_b)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("portable fact"));
+}
+
+#[test]
+fn log_prints_nothing_gracefully_when_empty() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
+        .assert()
+        .success();
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("log")
+        .assert()
+        .success();
 }
 
 #[test]

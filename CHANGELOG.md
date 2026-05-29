@@ -119,6 +119,29 @@ For the conventions used to write entries in this file, see
 - 6 new MCP tool tests cover round-trip remember + list, archive
   via forget, empty-query rejection, unknown-id error, and invalid
   scope handling.
+- v0.1.0-beta.1 client integration. New `integrations` module with
+  adapters for Claude Code, Kiro CLI, Cursor, Codex CLI, and
+  Continue. `memryzed install` auto-detects which clients are
+  present and writes the Memryzed MCP entry into each, backing up
+  the existing config to `<file>.memryzed.bak` first. `--client`
+  targets one client, `--print` emits the config block without
+  writing. `memryzed uninstall` removes the entry with `--unwire`
+  and deletes the data directory with `--purge`.
+- v0.1.0-beta.1 audit log. New `audit` module writes append-only
+  JSONL to `~/.memryzed/audit.log`. `memryzed log` prints recent
+  entries, `--follow` streams new ones, `--tail N` and `--client`
+  filter the output.
+- v0.1.0-beta.1 configuration commands. `memryzed config` prints
+  the active config; `config get`, `config set`, and `config edit`
+  read, write (with type coercion), and open the TOML in `$EDITOR`.
+- v0.1.0-beta.1 data portability. New `export` module produces
+  versioned JSON (schema version 1). `memryzed export` writes it to
+  stdout (`--pretty` for indented output); `memryzed import`
+  restores it with last-write-wins conflict resolution, `--dry-run`
+  to preview, and `--yes` to confirm. Embeddings are regenerated on
+  import rather than stored in the file.
+- Corrected the documented Kiro CLI MCP config path to
+  `~/.kiro/settings/mcp.json`.
 
 ### Changed
 

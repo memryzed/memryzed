@@ -225,17 +225,59 @@ pub enum Command {
         /// Stream new entries as they are written.
         #[arg(short = 'f', long)]
         follow: bool,
+
+        /// Show the last N entries.
+        #[arg(long, value_name = "N", default_value_t = 50)]
+        tail: usize,
+
+        /// Filter to a single client.
+        #[arg(long, value_name = "NAME")]
+        client: Option<String>,
     },
 
     /// Show, get, set, or edit configuration.
-    Config,
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
+    },
 
     /// Export all data to JSON on stdout.
-    Export,
+    Export {
+        /// Pretty-print the JSON output.
+        #[arg(long)]
+        pretty: bool,
+    },
 
     /// Import data from a JSON file produced by `memryzed export`.
     Import {
         /// Path to the export file.
         file: PathBuf,
+
+        /// Report what would be imported without writing.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Do not prompt for confirmation.
+        #[arg(long)]
+        yes: bool,
     },
+}
+
+/// Subcommands for `memryzed config`.
+#[derive(Debug, Subcommand)]
+pub enum ConfigAction {
+    /// Print a single key's value.
+    Get {
+        /// Dotted key, for example memory.auto_approve_threshold.
+        key: String,
+    },
+    /// Set a single key's value.
+    Set {
+        /// Dotted key, for example memory.auto_approve_threshold.
+        key: String,
+        /// New value. Coerced to bool/int/float when possible.
+        value: String,
+    },
+    /// Open the configuration file in $EDITOR.
+    Edit,
 }

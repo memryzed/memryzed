@@ -24,10 +24,13 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod audit;
 pub mod clock;
 pub mod embedder;
 pub mod error;
+pub mod export;
 pub mod id;
+pub mod integrations;
 pub mod memory;
 pub mod paths;
 pub mod projects;
