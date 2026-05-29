@@ -397,7 +397,23 @@ impl MemryzedServer {
         &self,
         Parameters(args): Parameters<ExtractArgs>,
     ) -> Result<CallToolResult, McpError> {
-        let candidates = extractor::extract(&args.message);
+        // Rule-based candidates always run. When the caller opts into
+        // Ollama and it is reachable, its candidates are merged in;
+        // if it is unreachable we silently use rule-based only.
+        let mut candidates = extractor::extract(&args.message);
+        if args.use_ollama.unwrap_or(false) {
+            let cfg = memryzed_core::extractor::ollama::OllamaConfig::default();
+            if let Some(llm) = memryzed_core::extractor::ollama::extract(&cfg, &args.message) {
+                for c in llm {
+                    if !candidates
+                        .iter()
+                        .any(|e| e.content.eq_ignore_ascii_case(&c.content))
+                    {
+                        candidates.push(c);
+                    }
+                }
+            }
+        }
         let threshold = args.auto_approve_threshold.unwrap_or(0.85);
         let project_id = self.inner.project_id.lock().await.clone();
 
@@ -563,6 +579,9 @@ struct ExtractArgs {
     /// Originating client identifier, recorded on stored memories.
     #[serde(default)]
     client: Option<String>,
+    /// Also consult a local Ollama instance (off by default).
+    #[serde(default)]
+    use_ollama: Option<bool>,
 }
 
 // ------------------------ response types ------------------------
@@ -958,6 +977,7 @@ mod tests {
                 message: "remember that I deploy with cargo-dist".into(),
                 auto_approve_threshold: None,
                 client: Some("kiro".into()),
+                use_ollama: None,
             }))
             .await
             .unwrap();
@@ -978,6 +998,7 @@ mod tests {
                 message: "I prefer pnpm over npm".into(),
                 auto_approve_threshold: Some(1.01),
                 client: None,
+                use_ollama: None,
             }))
             .await
             .unwrap();
@@ -996,6 +1017,7 @@ mod tests {
                 message: "what time is it".into(),
                 auto_approve_threshold: None,
                 client: None,
+                use_ollama: None,
             }))
             .await
             .unwrap();

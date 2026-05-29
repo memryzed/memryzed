@@ -30,7 +30,7 @@ fn version_flag_prints_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.3.0"));
+        .stdout(predicate::str::contains("0.4.0"));
 }
 
 #[test]
@@ -411,12 +411,29 @@ fn sessions_empty_then_resume_reports_none() {
 }
 
 #[test]
-fn unimplemented_subcommand_fails_with_message() {
+fn update_check_returns_a_release_status() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path().join("memryzed");
+
     cmd()
-        .arg("update")
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("init")
+        .arg("--yes")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("not yet implemented"));
+        .success();
+
+    // `update --check` reports without attempting an install.
+    // The exit code is zero whether or not a network check succeeds:
+    // an offline test still reports a clean "current" or "unknown"
+    // status. A non-zero exit would signal a real failure.
+    cmd()
+        .arg("--data-dir")
+        .arg(&dir)
+        .arg("update")
+        .arg("--check")
+        .assert()
+        .success();
 }
 
 #[test]

@@ -28,6 +28,7 @@ mod search;
 mod serve;
 mod sessions;
 mod show;
+mod update;
 
 use anyhow::Result;
 
@@ -188,11 +189,9 @@ pub fn dispatch(cli: Cli) -> Result<()> {
 
         Command::Review => review::run(&context),
 
-        Command::Update { .. } => Err(exit::Coded::new(
-            exit::GENERAL_ERROR,
-            "this command is not yet implemented in this build",
-        )
-        .into()),
+        Command::Update { check, yes: _ } => {
+            update::run(&context, update::Args { check_only: check })
+        }
     }
 }
 

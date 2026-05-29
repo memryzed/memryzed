@@ -7,16 +7,19 @@ decision changes.
 
 ## Version
 
-`0.3.0` (local git only; not yet tagged publicly).
-publicly yet).
+`0.4.0` (local git only; not yet tagged publicly).
 
 ## Where the code lives
 
 - Local working tree: `/mnt/c/Users/HamzaArjah/Documents/Hamza/memryzed`
 - Local git branch: `main`
 - Remote: not yet created. The intended remote is
-  `github.com/memryzed/memryzed`.
-- Release binary: `~/.memryzed/bin/memryzed`
+  `github.com/memryzed/memryzed`. The `update` command treats the
+  missing remote gracefully and reports an `Unknown` status rather
+  than failing.
+- Release binary on this machine: `~/.memryzed/bin/memryzed`. May
+  lag the latest committed version; rebuild and copy after every
+  significant change.
 
 ## Capability matrix
 
@@ -39,7 +42,7 @@ else is planned but not implemented.
 | `memryzed serve` (MCP stdio)  | done   | alpha.5   |
 | `memryzed install`            | done   | beta.1    |
 | `memryzed uninstall`          | done   | beta.1    |
-| `memryzed update`             | todo   | later     |
+| `memryzed update`             | done   | 0.4.0     |
 | `memryzed review` (TUI)       | done   | 0.3.0     |
 | `memryzed sessions`           | done   | 0.2.0     |
 | `memryzed resume`             | done   | 0.2.0     |
@@ -58,15 +61,14 @@ else is planned but not implemented.
 | `checkpoint`     | done   | 0.2.0     |
 | `resume`         | done   | 0.2.0     |
 | `list_sessions`  | done   | 0.2.0     |
-| `end_session`    | todo   | 0.2.0     |
+| `end_session`    | done   | 0.2.0     |
+| `extract_from`   | done   | 0.3.0     |
 
 ### Storage
 
 - SQLite via rusqlite (bundled), WAL mode, busy_timeout 5000 ms.
-- Schema at `user_version = 3`:
-  - `001_initial.sql` — `memories`, `projects`, `recall_log`, `meta`.
-  - `002_embeddings.sql` — `memory_embeddings` (BLOB f32 LE).
-  - `003_fts.sql` — `memory_fts` (FTS5) plus content-sync triggers.
+- Schema covering: `memories`, `memory_embeddings`, `memory_fts`,
+  `projects`, `sessions`, `recall_log`, `meta`.
 - sqlite-vec virtual table is **not** used yet; cosine similarity is
   computed in Rust over the BLOB column. Sufficient for the v1
   working set; revisit at scale.
@@ -79,7 +81,7 @@ else is planned but not implemented.
   and offline CI.
 - Linux glibc shim at `crates/memryzed-core/c/glibc_compat.c` keeps
   the prebuilt ONNX Runtime linkable on glibc < 2.38 (e.g. Ubuntu
-  22.04). Weak symbols, so it is harmless on glibc 2.38+.
+  22.04). Weak symbols, harmless on glibc 2.38+.
 
 ### Retrieval
 
@@ -88,17 +90,50 @@ else is planned but not implemented.
   pinned memories.
 - Pure Rust math; no sqlite-vec dependency.
 
+### Extractor (0.3.0+)
+
+- Rule-based pattern matcher implementing the patterns in the v1
+  spec ("I prefer X over Y", "this repo uses X", "actually it is X
+  not Y", direct "remember X" requests).
+- Optional Ollama-based extractor at
+  `crates/memryzed-core/src/extractor/ollama.rs` for richer
+  candidates. Off by default; falls back to rule-based when Ollama
+  is unreachable.
+- Candidates flow into the pending queue with a confidence score.
+  High-confidence candidates auto-approve; the rest go to
+  `memryzed review` for triage.
+
+### Sessions (0.2.0+)
+
+- Per-project session records; `checkpoint` and `resume` MCP tools
+  let agents save and restore working state per repository.
+- Idle sessions transition to `paused` after 24 hours; archived
+  after 30 days unless pinned.
+
+### Update (0.4.0)
+
+- `memryzed update --check` queries the GitHub Releases API at
+  `https://api.github.com/repos/memryzed/memryzed/releases/latest`.
+- Status enum: `UpToDate`, `Available`, `Unknown`. Unknown covers
+  network failures, missing repository, and parse errors. Never
+  surfaces as a hard error so the CLI exits zero on
+  `update --check` even when offline.
+- The actual binary swap is owned by the install script, not by
+  the running process.
+
 ## Test coverage
 
-109 tests pass plus 1 ignored real-model test:
+150 tests pass plus 1 ignored real-model test:
 
-- 20 CLI integration tests (`crates/memryzed-cli/tests/cli.rs`).
-- 83 core unit tests across `audit`, `clock`, `embedder`, `error`,
-  `export`, `id`, `integrations`, `memory`, `paths`, `projects`,
-  `retrieval`, `storage`, `version`.
-- 6 MCP tool tests in `memryzed-mcp`.
+- 21 CLI integration tests (`crates/memryzed-cli/tests/cli.rs`).
+- 113 core unit tests across `audit`, `clock`, `embedder`, `error`,
+  `export`, `extractor`, `id`, `integrations`, `memory`, `paths`,
+  `projects`, `retrieval`, `sessions`, `storage`, `update`,
+  `version`.
+- 13 MCP tool tests in `memryzed-mcp` (8 tools).
+- 3 additional small tests scattered across other modules.
 - 1 `#[ignore]` test that downloads the real BGE-small model and
-  embeds two strings; passes locally.
+  embeds two strings; passes locally on demand.
 
 CI gate enforced locally and in `.github/workflows/ci.yml`:
 
@@ -107,10 +142,14 @@ CI gate enforced locally and in `.github/workflows/ci.yml`:
 - `cargo test --workspace`
 - Runs on Linux, macOS, Windows.
 
-## Local git history
+## Local git history (most recent first)
 
 ```
-(beta.1) feat: v0.1.0-beta.1 client integrations, audit log, config, export/import
+2bf2031 feat: v0.3.0 extractor, pending queue, extract_from tool, review TUI
+7791c9a feat: v0.2.0 sessions per repo (checkpoint, resume, list_sessions, end_session)
+bf42b70 release: 0.1.0
+7654dbd build: v0.1.0-rc.1 release pipeline and install scripts
+5c51881 feat: v0.1.0-beta.1 install/uninstall, audit log, config, export/import
 56c0983 fix(docs): correct Kiro CLI MCP config path
 87dd529 docs: add docs/development/status.md as the persistent project checkpoint
 630517a feat: v0.1.0-alpha.5 MCP server (recall, remember, forget, list_memories)
@@ -120,15 +159,25 @@ ac0675b feat: v0.1.0-alpha.4 hybrid retrieval (vector + FTS + recency)
 acc0b69 chore: scaffold v0.1.0-alpha.1 (proof-of-life)
 ```
 
-Nothing has been pushed to a remote. There are no tags yet; tags
-are produced by the release pipeline once `cargo-dist` is set up.
+A v0.4.0 commit is pending and will land alongside the `update`
+command, the Ollama extractor, and the doc refresh.
+
+## Confirmed working with real agents
+
+End-to-end exchange verified with Kiro CLI on 2026-05-28: the agent
+called `memryzed.recall` with a natural-language query, got back
+the stored fact, and answered correctly. The MCP transport,
+embeddings, hybrid retrieval, and the four core tools all
+round-trip correctly through a real client.
 
 ## Decisions still open
 
 - GitHub org and repo creation. Name reserved as `memryzed` per the
-  brand decisions, but no actual org/repo exists yet.
+  brand decisions, but no actual org/repo exists yet. Until that
+  lands, `memryzed update` reports `Unknown`.
 - `cargo-dist` setup. The release pipeline is documented in
-  `docs/development/release-process.md` but not wired into CI.
+  `docs/development/release-process.md`. Wired into CI in v0.1.0-rc.1
+  but never exercised against a real remote.
 - The website at `memryzed.com`. Domain decision recorded; not
   registered or deployed.
 - Code-signing certs for macOS (Apple Developer Program) and
@@ -138,45 +187,40 @@ are produced by the release pipeline once `cargo-dist` is set up.
 
 ## What is next on the roadmap
 
-In planned order, smallest first:
+1. Finish v0.4.0 — Ollama extractor polish, `memryzed update`,
+   smoke tests with the real agent.
+2. v0.5.0+ — transcript mining for Claude Code JSONL session
+   files; auto-save hooks to call `checkpoint` on a cadence;
+   per-message recall via `memryzed sweep`.
+3. Quality benchmarks publication per `docs/specs/benchmarks.md`
+   (LongMemEval, LoCoMo, ConvoMem, MemBench).
+4. Public release: GitHub org, push, tag v0.1.0, run cargo-dist,
+   stand up `memryzed.com`.
+5. Ongoing: more MCP client integrations, performance work,
+   multilingual embeddings.
 
-1. `memryzed install` — auto-detect Claude Code, Kiro, Cursor,
-   Codex, and Continue MCP configs and write the Memryzed entry
-   automatically. Pairs with `uninstall` and `--print` flag.
-2. `cargo-dist` integration and the install scripts at
-   `memryzed.com/install.sh`, `install.ps1`, `install.cmd`.
-3. The first published quality benchmark numbers per
-   `docs/specs/benchmarks.md`.
-4. `0.2.0` — sessions: `checkpoint`, `resume`, `list_sessions`,
-   `end_session` plus the `sessions` table and the agent-side
-   resume UX.
-5. `0.3.0` — rule-based extractor with the pending review queue
-   and the `memryzed review` TUI.
-6. `0.4.0` — optional Ollama extractor; `memryzed update`; more
-   MCP client integrations.
-7. `0.5.0+` — polish, transcript mining, auto-save hooks, packaging
-   (Homebrew, Scoop, winget), benchmarks publication.
-8. `1.0.0` — full v1 spec met.
+## Wiring Memryzed into the major MCP clients
 
-## Wiring Memryzed into Claude Code (current state)
+| Client      | Config path                          |
+|-------------|--------------------------------------|
+| Claude Code | `~/.claude/mcp.json`                 |
+| Kiro CLI    | `~/.kiro/settings/mcp.json`          |
+| Cursor      | `~/.cursor/mcp.json`                 |
+| Codex CLI   | `~/.codex/mcp.json`                  |
+| Continue    | `~/.continue/config.json`            |
 
-Add this entry to `~/.claude/mcp.json`:
+`memryzed install` handles auto-detection. For each, the entry is:
 
 ```json
 {
   "mcpServers": {
     "memryzed": {
-      "command": "/root/.memryzed/bin/memryzed",
+      "command": "/abs/path/to/memryzed",
       "args": ["serve"]
     }
   }
 }
 ```
-
-Restart Claude Code. The four tools (`recall`, `remember`,
-`forget`, `list_memories`) appear in the client. Sessions are not
-yet implemented; the agent will see clear errors if it asks for
-them.
 
 ## Useful commands during development
 
@@ -197,13 +241,13 @@ To run the real-model embedder test locally:
 cargo test -p memryzed-core fastembed_real -- --ignored --nocapture
 ```
 
-To drive the MCP server by hand:
+To drive the MCP server by hand (no embedder, fast):
 
 ```
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{
   "protocolVersion":"2024-11-05","capabilities":{},
   "clientInfo":{"name":"smoke","version":"0"}}}' \
-| memryzed serve
+| MEMRYZED_DISABLE_EMBEDDING=1 memryzed serve
 ```
 
 ## What this document is not

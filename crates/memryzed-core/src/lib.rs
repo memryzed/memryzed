@@ -38,6 +38,7 @@ pub mod projects;
 pub mod retrieval;
 pub mod sessions;
 pub mod storage;
+pub mod update;
 pub mod version;
 
 pub use clock::now_epoch_seconds;

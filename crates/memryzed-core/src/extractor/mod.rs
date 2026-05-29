@@ -29,6 +29,8 @@ use regex::Regex;
 
 use crate::memory::{Kind, Scope};
 
+pub mod ollama;
+
 /// A proposed memory produced by the extractor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
