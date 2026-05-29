@@ -231,6 +231,30 @@ pub fn render_entry(binary_path: &Path) -> String {
     serde_json::to_string_pretty(&Value::Object(wrapper)).unwrap_or_default()
 }
 
+/// Whether a client's config currently contains a Memryzed server entry.
+///
+/// Returns `false` (without erroring) when the config file does not
+/// exist, is empty, or contains malformed JSON. Used by
+/// `memryzed doctor` to summarize integration state without ever
+/// failing the overall health report on a malformed user file.
+pub fn is_configured(adapter: &dyn Adapter, home: &Path) -> bool {
+    let path = adapter.config_path(home);
+    if !path.is_file() {
+        return false;
+    }
+    let raw = match fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let doc: Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    doc.get("mcpServers")
+        .and_then(|v| v.get(SERVER_NAME))
+        .is_some()
+}
+
 fn build_entry(binary_path: &Path) -> Map<String, Value> {
     let mut entry = Map::new();
     entry.insert(

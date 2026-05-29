@@ -44,10 +44,9 @@ pub fn run(ctx: &Context) -> Result<()> {
     report.section("Memory and integrations");
     report.add(check_database(ctx));
     report.add(check_embedder(ctx));
-    report.add(skipped(
-        "MCP integrations",
-        "auto-detect lands in v0.1.0-beta.1",
-    ));
+    for r in check_integrations() {
+        report.add(r);
+    }
 
     report.print(ctx.quiet);
 
@@ -255,4 +254,42 @@ fn check_embedder(ctx: &Context) -> CheckResult {
         }
         Err(err) => fail("Embedding model", err.to_string()),
     }
+}
+
+/// One row per known MCP client adapter. Each row reports whether
+/// the client appears installed on this machine and, if so, whether
+/// Memryzed is registered in its config.
+fn check_integrations() -> Vec<CheckResult> {
+    let home = match dirs_home() {
+        Some(h) => h,
+        None => {
+            return vec![fail(
+                "MCP integrations",
+                "could not determine the user's home directory",
+            )];
+        }
+    };
+
+    let adapters = memryzed_core::integrations::all();
+    let mut rows = Vec::with_capacity(adapters.len());
+    for adapter in adapters {
+        let name = format!("MCP - {}", adapter.display_name());
+        if !adapter.is_present(&home) {
+            rows.push(skipped(&name, "client not installed"));
+            continue;
+        }
+        if memryzed_core::integrations::is_configured(adapter.as_ref(), &home) {
+            rows.push(ok(&name, "Memryzed configured"));
+        } else {
+            rows.push(skipped(
+                &name,
+                "client present but Memryzed not configured; run `memryzed install`",
+            ));
+        }
+    }
+    rows
+}
+
+fn dirs_home() -> Option<std::path::PathBuf> {
+    directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
 }
