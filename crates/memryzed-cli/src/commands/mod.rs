@@ -181,7 +181,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Update { .. } | Command::Review | Command::Sessions | Command::Resume { .. } => {
             Err(exit::Coded::new(
                 exit::GENERAL_ERROR,
-                "this command is not yet implemented in v0.1.0-beta.1",
+                "this command is not yet implemented in v0.1.0-rc.1",
             )
             .into())
         }

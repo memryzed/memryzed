@@ -142,6 +142,16 @@ For the conventions used to write entries in this file, see
   import rather than stored in the file.
 - Corrected the documented Kiro CLI MCP config path to
   `~/.kiro/settings/mcp.json`.
+- v0.1.0-rc.1 release engineering. Added cargo-dist configuration
+  under `[workspace.metadata.dist]` in the root manifest (targets,
+  installers, checksum, install path) and a `dist` build profile.
+  Added `.github/workflows/release.yml` that builds every supported
+  target on a version-tag push, packages each with a SHA-256
+  sidecar, and publishes a GitHub Release. Added the canonical
+  install scripts under `dist/` (`install.sh`, `install.ps1`,
+  `install.cmd`) that download release archives, verify checksums,
+  install to the standard location, and update PATH. These are the
+  files served from memryzed.com.
 
 ### Changed
 

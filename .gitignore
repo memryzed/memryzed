@@ -19,8 +19,9 @@ Thumbs.db
 .env
 .env.local
 
-# cargo-dist
-/dist/
+# cargo-dist build output (the dist/ directory holds tracked
+# install-script templates; cargo-dist writes to target/distrib)
+/target/distrib/
 
 # Local development data and databases
 /dev-data/

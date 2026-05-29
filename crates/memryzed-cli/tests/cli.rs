@@ -30,7 +30,7 @@ fn version_flag_prints_workspace_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.1.0-beta.1"));
+        .stdout(predicate::str::contains("0.1.0-rc.1"));
 }
 
 #[test]

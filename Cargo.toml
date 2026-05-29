@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0-beta.1"
+version = "0.1.0-rc.1"
 edition = "2021"
 rust-version = "1.78"
 license = "Apache-2.0"
@@ -21,9 +21,9 @@ categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
 # Internal
-memryzed-core = { path = "crates/memryzed-core", version = "0.1.0-beta.1" }
-memryzed-mcp = { path = "crates/memryzed-mcp", version = "0.1.0-beta.1" }
-memryzed-tui = { path = "crates/memryzed-tui", version = "0.1.0-beta.1" }
+memryzed-core = { path = "crates/memryzed-core", version = "0.1.0-rc.1" }
+memryzed-mcp = { path = "crates/memryzed-mcp", version = "0.1.0-rc.1" }
+memryzed-tui = { path = "crates/memryzed-tui", version = "0.1.0-rc.1" }
 
 # External
 anyhow = "1.0"
@@ -54,3 +54,40 @@ predicates = "3.1"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# The profile that cargo-dist uses to build release binaries.
+# Inherits from release; kept distinct so we can tune distribution
+# builds without affecting local `cargo build --release`.
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# cargo-dist configuration.
+#
+# This drives the release pipeline: which targets to build, which
+# installers to generate, and where to publish. Regenerate the CI
+# workflow after editing with `cargo dist init`.
+#
+# rc.1 commits the configuration so the pipeline exists and can be
+# reviewed; the first real run happens when a vX.Y.Z tag is pushed
+# after the GitHub repository is created.
+[workspace.metadata.dist]
+cargo-dist-version = "0.22.1"
+ci = "github"
+installers = ["shell", "powershell"]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+# Publish prebuilt archives as GitHub Release assets.
+install-path = "~/.memryzed/bin"
+# Generate a checksum file for every artifact.
+checksum = "sha256"
+# Build only the memryzed binary, not the library crates.
+[workspace.metadata.dist.bin-aliases]
+memryzed = ["memryzed"]

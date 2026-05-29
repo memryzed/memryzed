@@ -7,7 +7,7 @@ decision changes.
 
 ## Version
 
-`0.1.0-beta.1` (local git only; nothing has been pushed or tagged
+`0.1.0-rc.1` (local git only; nothing has been pushed or tagged
 publicly yet).
 
 ## Where the code lives

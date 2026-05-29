@@ -1,0 +1,97 @@
+name: Release
+
+# Builds release artifacts for every supported target and publishes
+# them to a GitHub Release. Triggered by pushing a version tag.
+#
+# This workflow is a hand-written stand-in for the one
+# `cargo dist generate-ci github` produces. When the GitHub
+# repository exists, run `cargo dist init` once to regenerate this
+# file with the exact matrix cargo-dist expects, then commit the
+# result. Until then, this serves as the reference shape.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross-compilation tooling (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+      - name: Build
+        run: cargo build --profile dist --target ${{ matrix.target }} --package memryzed-cli
+      - name: Package
+        shell: bash
+        run: |
+          bin="memryzed"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then bin="memryzed.exe"; fi
+          staging="memryzed-${{ matrix.target }}"
+          mkdir "$staging"
+          cp "target/${{ matrix.target }}/dist/$bin" "$staging/"
+          cp README.md LICENSE NOTICE "$staging/"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            7z a "$staging.zip" "$staging"
+            certutil -hashfile "$staging.zip" SHA256 > "$staging.zip.sha256"
+          else
+            tar czf "$staging.tar.gz" "$staging"
+            shasum -a 256 "$staging.tar.gz" > "$staging.tar.gz.sha256"
+          fi
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: memryzed-${{ matrix.target }}
+          path: |
+            memryzed-*.tar.gz*
+            memryzed-*.zip*
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
