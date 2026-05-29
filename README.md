@@ -10,8 +10,13 @@ Your agent stops forgetting. Your work stops restarting from zero.
 
 ## Status
 
-Pre-release. The v1 specification is in `docs/specs/v1.md`.
-The first tagged release will be `v0.1.0`.
+Pre-1.0. Memryzed is feature-complete against the v1 specification
+(`docs/specs/v1.md`): local memory store, hybrid retrieval,
+per-repository sessions, the rule-based extractor with an optional
+local-LLM extractor, and an MCP server exposing nine tools. The API
+and on-disk format may still change before 1.0; see
+`docs/development/versioning.md` for the compatibility policy and
+`CHANGELOG.md` for what has shipped.
 
 ## Install
 

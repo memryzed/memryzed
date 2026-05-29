@@ -34,6 +34,32 @@ For the conventions used to write entries in this file, see
 
 (none)
 
+## [0.4.0] - 2026-05-29
+
+### Added
+
+- `memryzed update` and `memryzed update --check`. Queries the
+  GitHub Releases API for the latest tag and compares it to the
+  running version. The check is non-fatal: network failures, a
+  missing repository, and parse errors all collapse into an
+  `Unknown` status so the command exits zero even when offline.
+  The binary swap itself is owned by the install script.
+- Optional Ollama-based extractor
+  (`extractor/ollama.rs`). When enabled it proposes richer
+  candidate memories from recent conversation turns through a local
+  Ollama model, falling back to the rule-based extractor when
+  Ollama is unreachable. Off by default.
+- `integrations::is_configured`, a non-failing check for whether a
+  client's MCP config already contains the Memryzed server entry.
+
+### Fixed
+
+- `memryzed doctor` now reports one row per known MCP client
+  (installed and configured, installed but not configured, or not
+  installed) instead of a stale placeholder line. Reads each
+  client's config defensively so a malformed user file never fails
+  the health report.
+
 ## [0.3.0] - 2026-05-29
 
 ### Added
