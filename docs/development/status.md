@@ -7,7 +7,7 @@ decision changes.
 
 ## Version
 
-`0.1.0-rc.1` (local git only; nothing has been pushed or tagged
+`0.1.0` (local git only; not yet tagged publicly).
 publicly yet).
 
 ## Where the code lives

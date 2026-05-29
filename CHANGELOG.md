@@ -12,6 +12,38 @@ For the conventions used to write entries in this file, see
 
 ### Added
 
+(none)
+
+### Changed
+
+(none)
+
+### Deprecated
+
+(none)
+
+### Removed
+
+(none)
+
+### Fixed
+
+(none)
+
+### Security
+
+(none)
+
+## [0.1.0] - 2026-05-29
+
+First non-prerelease. Accumulates everything built across the
+0.1.0-alpha and 0.1.0-rc series into one release: a local MCP
+server with memory storage, embeddings, hybrid retrieval, client
+auto-install, audit log, configuration, and data export/import,
+plus the release pipeline and install scripts.
+
+### Added
+
 - Initial project documentation set, including the v1 specification, user
   guide, configuration reference, MCP tool reference, agent author guide,
   and operations documentation.
@@ -204,4 +236,5 @@ The "Unreleased" section at the top accumulates entries between releases.
 On release, the section is renamed to the new version, the date is added,
 and a fresh empty "Unreleased" section is created.
 
-[Unreleased]: https://github.com/memryzed/memryzed/compare/main...HEAD
+[Unreleased]: https://github.com/memryzed/memryzed/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/memryzed/memryzed/releases/tag/v0.1.0
