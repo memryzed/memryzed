@@ -26,6 +26,7 @@
 pub mod audit;
 pub mod clock;
 pub mod embedder;
+pub mod episodes;
 pub mod error;
 pub mod export;
 pub mod extractor;

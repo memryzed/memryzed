@@ -56,8 +56,25 @@ Returns:
           "created_at": "2026-05-20T10:30:00Z"
         }
       ],
-      "summary": "Memryzed: 1 fact found in global scope"
+      "episodes": [
+        {
+          "id": "epi_a1b2c3",
+          "role": "user",
+          "content": "let's switch the deploy step to use eventbridge",
+          "source_agent": "kiro",
+          "score": 0.88,
+          "created_at": 1778600000
+        }
+      ],
+      "summary": "Memryzed: 1 fact, 1 conversation excerpt found"
     }
+
+The `results` array holds curated facts. The `episodes` array holds
+verbatim conversation turns recalled from prior sessions, possibly
+captured under a different agent. The `source_agent` field tells the
+caller which agent the turn came from, which is what enables
+cross-agent continuity: a conversation held in Kiro surfaces when
+Claude Code (or any client) calls `recall`.
 
 The `summary` field is a one-line, user-readable description that
 clients are encouraged to render in the agent's response so users see

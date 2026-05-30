@@ -12,6 +12,18 @@ For the conventions used to write entries in this file, see
 
 ### Added
 
+- Episodic memory: verbatim conversation turns for cross-agent
+  continuity. Mining now captures each substantive turn from a
+  transcript as an embedded `episode`, stored in a new `episodes`
+  table (migration 005) with its own FTS index. The `recall` MCP
+  tool searches episodes alongside curated memories, so a
+  conversation held in one agent (for example Kiro) can be recalled
+  from another (for example Claude Code). No LLM is required: the
+  bundled embedding model does the work and the calling agent does
+  the understanding. Trivial turns (under 24 characters) are skipped.
+- Batched embedding for capture. All substantive turns in a
+  transcript are embedded in a single call, making `mine` and
+  `watch` an order of magnitude faster than per-turn embedding.
 - Universal cross-agent auto-capture. `memryzed watch` polls every
   detected agent transcript directory on an interval and mines new
   turns incrementally, capturing memories from Kiro CLI, Claude Code,

@@ -87,19 +87,19 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
         let reports = mining::mine_all(&mut db, embedder.as_ref(), &home, &opts, now)?;
         let captured: usize = reports
             .iter()
-            .map(|(_, r)| r.memories_approved + r.memories_pending)
+            .map(|(_, r)| r.episodes_captured + r.memories_approved + r.memories_pending)
             .sum();
         if captured > 0 && !ctx.quiet {
             for (src, r) in &reports {
-                let n = r.memories_approved + r.memories_pending;
+                let facts = r.memories_approved + r.memories_pending;
+                let n = r.episodes_captured + facts;
                 if n > 0 {
                     println!(
-                        "[{}] {}: captured {} ({} approved, {} pending)",
+                        "[{}] {}: {} conversation excerpts, {} facts",
                         now,
                         src.display_name(),
-                        n,
-                        r.memories_approved,
-                        r.memories_pending,
+                        r.episodes_captured,
+                        facts,
                     );
                 }
             }

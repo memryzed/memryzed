@@ -55,6 +55,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "004_sessions",
         sql: include_str!("../../migrations/004_sessions.sql"),
     },
+    Migration {
+        target_version: 5,
+        name: "005_episodes",
+        sql: include_str!("../../migrations/005_episodes.sql"),
+    },
 ];
 
 /// Highest schema version known to this binary.

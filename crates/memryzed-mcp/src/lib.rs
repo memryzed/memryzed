@@ -134,6 +134,18 @@ impl MemryzedServer {
         let db = self.inner.db.lock().await;
         let results = retrieval_search(&db, self.inner.embedder.as_ref(), &args.query, &opts)
             .map_err(core_to_mcp)?;
+        // Also recall verbatim conversation turns (episodes) so a
+        // conversation held in one agent surfaces in another.
+        let now = now_epoch_seconds();
+        let limit = args.limit.unwrap_or(10).max(1) as usize;
+        let episodes = memryzed_core::episodes::recall(
+            &db,
+            self.inner.embedder.as_ref(),
+            &args.query,
+            limit,
+            now,
+        )
+        .map_err(core_to_mcp)?;
         drop(db);
 
         let payload = RecallResponse {
@@ -151,10 +163,23 @@ impl MemryzedServer {
                     created_at: r.memory.created_at,
                 })
                 .collect(),
+            episodes: episodes
+                .iter()
+                .map(|e| EpisodeRecallHit {
+                    id: e.episode.id.clone(),
+                    role: e.episode.role.clone(),
+                    content: e.episode.content.clone(),
+                    source_agent: e.episode.source_agent.clone(),
+                    score: e.score,
+                    created_at: e.episode.created_at,
+                })
+                .collect(),
             summary: format!(
-                "Memryzed: {} fact{} found",
+                "Memryzed: {} fact{}, {} conversation excerpt{} found",
                 results.len(),
-                if results.len() == 1 { "" } else { "s" }
+                if results.len() == 1 { "" } else { "s" },
+                episodes.len(),
+                if episodes.len() == 1 { "" } else { "s" },
             ),
         };
         Ok(CallToolResult::success(vec![Content::text(json_string(
@@ -578,6 +603,7 @@ struct ExtractArgs {
 #[derive(Debug, Serialize)]
 struct RecallResponse {
     results: Vec<RecallHit>,
+    episodes: Vec<EpisodeRecallHit>,
     summary: String,
 }
 
@@ -590,6 +616,18 @@ struct RecallHit {
     kind: String,
     confidence: Option<f64>,
     pinned: bool,
+    score: f32,
+    created_at: i64,
+}
+
+/// A recalled conversation turn from a prior session, possibly with a
+/// different agent. This is the cross-agent continuity payload.
+#[derive(Debug, Serialize)]
+struct EpisodeRecallHit {
+    id: String,
+    role: String,
+    content: String,
+    source_agent: Option<String>,
     score: f32,
     created_at: i64,
 }

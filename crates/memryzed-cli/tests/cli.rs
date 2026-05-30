@@ -136,7 +136,7 @@ fn doctor_succeeds_after_init() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Database integrity"))
-        .stdout(predicate::str::contains("schema v4"))
+        .stdout(predicate::str::contains("schema v5"))
         .stdout(predicate::str::contains("All systems healthy"));
 }
 

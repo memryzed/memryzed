@@ -40,6 +40,11 @@ pub fn new_memory_id() -> String {
     format!("{MEM_PREFIX}{}", random_hex())
 }
 
+/// Generate a fresh episode ID using the OS RNG.
+pub fn new_episode_id() -> String {
+    format!("epi_{}", random_hex())
+}
+
 /// Generate a fresh session ID using the OS RNG.
 pub fn new_session_id() -> String {
     format!("{SESS_PREFIX}{}", random_hex())

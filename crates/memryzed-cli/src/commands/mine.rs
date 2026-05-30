@@ -62,6 +62,12 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
             force: args.force,
             incremental: false,
         };
+        if !ctx.quiet && !args.dry_run {
+            println!(
+                "Mining all detected agents. The first run embeds your history and \
+                 can take a few minutes; later runs are incremental and fast."
+            );
+        }
         let reports = mining::mine_all(&mut db, embedder.as_ref(), &home, &opts, now)?;
         if !ctx.quiet {
             if reports.is_empty() {
@@ -71,12 +77,12 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
                 println!("Mined all detected agents{mode}");
                 for (src, r) in &reports {
                     println!(
-                        "  {:<14} found {:>4}  mined {:>4}  approved {:>3}  pending {:>3}",
+                        "  {:<14} found {:>4}  mined {:>4}  facts {:>3}  episodes {:>5}",
                         src.display_name(),
                         r.files_found,
                         r.files_mined,
-                        r.memories_approved,
-                        r.memories_pending,
+                        r.memories_approved + r.memories_pending,
+                        r.episodes_captured,
                     );
                 }
             }
@@ -119,6 +125,7 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
         println!("  sessions written:    {}", report.sessions_written);
         println!("  memories approved:   {}", report.memories_approved);
         println!("  memories pending:    {}", report.memories_pending);
+        println!("  episodes captured:   {}", report.episodes_captured);
         if report.memories_pending > 0 {
             println!();
             println!("Review pending candidates with `memryzed review`.");

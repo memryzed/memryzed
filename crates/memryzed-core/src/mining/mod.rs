@@ -34,6 +34,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::embedder::Embedder;
+use crate::episodes;
 use crate::error::{Error, Result};
 use crate::extractor;
 use crate::memory::{self, NewMemory, Scope};
@@ -97,6 +98,8 @@ pub struct MineReport {
     pub memories_approved: usize,
     /// Candidate memories stored pending (< threshold).
     pub memories_pending: usize,
+    /// Verbatim conversation turns captured as episodes.
+    pub episodes_captured: usize,
 }
 
 /// Mine every transcript under `path` into the database.
@@ -174,6 +177,9 @@ pub fn mine(
             mine_candidates(db, embedder, &turns, opts.threshold, opts.dry_run, now)?;
         report.memories_approved += approved;
         report.memories_pending += pending;
+
+        let captured = capture_episodes(db, embedder, source, &turns, &file, opts.dry_run, now)?;
+        report.episodes_captured += captured;
 
         if !opts.dry_run {
             if opts.incremental {
@@ -333,6 +339,44 @@ fn mine_candidates(
 /// Synthetic working directory used to scope imported sessions.
 fn mining_project_dir() -> PathBuf {
     PathBuf::from("memryzed://mined")
+}
+
+/// Capture each substantive turn as an episodic memory. This is the
+/// cross-agent continuity layer: verbatim turns embedded for semantic
+/// recall, regardless of which agent later asks. Trivial turns are
+/// skipped via [`episodes::is_substantive`]. All turns in the file are
+/// embedded in one batched call for speed.
+#[allow(clippy::too_many_arguments)]
+fn capture_episodes(
+    db: &mut Database,
+    embedder: &dyn Embedder,
+    source: Source,
+    turns: &[Turn],
+    file: &Path,
+    dry_run: bool,
+    now: i64,
+) -> Result<usize> {
+    let session_ref = file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string());
+    let agent = source.as_str().to_string();
+
+    let batch: Vec<episodes::NewEpisode> = turns
+        .iter()
+        .filter(|t| episodes::is_substantive(&t.text))
+        .map(|t| episodes::NewEpisode {
+            role: t.role.clone(),
+            content: t.text.clone(),
+            source_agent: Some(agent.clone()),
+            session_ref: session_ref.clone(),
+        })
+        .collect();
+
+    if dry_run {
+        return Ok(batch.len());
+    }
+    episodes::insert_batch(db, &batch, embedder, now)
 }
 
 /// Stable content hash for idempotency. Uses the same SHA-256 helper
