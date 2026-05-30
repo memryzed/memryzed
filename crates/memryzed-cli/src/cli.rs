@@ -245,9 +245,13 @@ pub enum Command {
         /// Defaults to the detected source's standard location.
         path: Option<PathBuf>,
 
-        /// Transcript source format: auto, kiro, or claude-code.
+        /// Transcript source format: auto, kiro, claude-code, copilot-cli.
         #[arg(long, value_name = "SOURCE", default_value = "auto")]
         source: String,
+
+        /// Mine every detected agent transcript directory.
+        #[arg(long)]
+        all: bool,
 
         /// Parse and report without writing anything.
         #[arg(long)]
@@ -262,6 +266,17 @@ pub enum Command {
     Hooks {
         #[command(subcommand)]
         action: HooksAction,
+    },
+
+    /// Continuously capture memories from all detected agents.
+    Watch {
+        /// Seconds between polls.
+        #[arg(long, value_name = "SECONDS", default_value = "15")]
+        interval: u64,
+
+        /// Run a single pass and exit instead of looping.
+        #[arg(long)]
+        once: bool,
     },
 
     /// Export all data to JSON on stdout.

@@ -60,8 +60,14 @@ pub struct MineOptions {
     pub threshold: f64,
     /// When true, parse and report but write nothing.
     pub dry_run: bool,
-    /// When true, re-mine transcripts even if already seen.
+    /// When true, ignore any saved offset and mine from the start.
     pub force: bool,
+    /// When true, only parse content appended since the last pass,
+    /// tracked by a per-file byte offset in the `meta` table. This is
+    /// what `memryzed watch` uses so a growing transcript yields only
+    /// its new turns. When false, the whole file is parsed but a
+    /// content hash still prevents re-mining an unchanged file.
+    pub incremental: bool,
 }
 
 impl Default for MineOptions {
@@ -71,6 +77,7 @@ impl Default for MineOptions {
             threshold: 0.85,
             dry_run: false,
             force: false,
+            incremental: false,
         }
     }
 }
@@ -80,9 +87,9 @@ impl Default for MineOptions {
 pub struct MineReport {
     /// Transcript files discovered under the path.
     pub files_found: usize,
-    /// Files actually parsed (not skipped as already-mined).
+    /// Files that yielded new content this pass.
     pub files_mined: usize,
-    /// Files skipped because they were mined before.
+    /// Files skipped because they had no new content.
     pub files_skipped: usize,
     /// Sessions created or updated.
     pub sessions_written: usize,
@@ -118,16 +125,42 @@ pub fn mine(
 
     for file in files {
         let raw = std::fs::read_to_string(&file)?;
-        let hash = content_hash(&raw);
-        let meta_key = format!("mined:{}", hash);
+        let file_key = file.to_string_lossy();
 
-        if !opts.force && db.meta_get(&meta_key)?.is_some() {
-            report.files_skipped += 1;
-            continue;
-        }
+        // Determine which slice of the file is new.
+        let (slice, new_offset): (&str, usize) = if opts.incremental {
+            let offset_key = format!("offset:{}", file_key);
+            let prev: usize = if opts.force {
+                0
+            } else {
+                db.meta_get(&offset_key)?
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0)
+            };
+            // A truncated or rotated file (shorter than the saved
+            // offset) restarts from the beginning.
+            let start = if prev > raw.len() { 0 } else { prev };
+            (&raw[start..], raw.len())
+        } else {
+            // Whole-file mode: a content hash prevents re-mining an
+            // unchanged file.
+            let hash = content_hash(&raw);
+            let meta_key = format!("mined:{}", hash);
+            if !opts.force && db.meta_get(&meta_key)?.is_some() {
+                report.files_skipped += 1;
+                continue;
+            }
+            (raw.as_str(), 0)
+        };
 
-        let turns = source.parse(&raw);
+        let turns = source.parse(slice);
         if turns.is_empty() {
+            // Still advance the offset so we do not re-scan the same
+            // non-conversational bytes next pass.
+            if opts.incremental && !opts.dry_run {
+                db.meta_set(&format!("offset:{}", file_key), &new_offset.to_string())?;
+            }
+            report.files_skipped += 1;
             continue;
         }
         report.files_mined += 1;
@@ -143,11 +176,47 @@ pub fn mine(
         report.memories_pending += pending;
 
         if !opts.dry_run {
-            db.meta_set(&meta_key, &now.to_string())?;
+            if opts.incremental {
+                db.meta_set(&format!("offset:{}", file_key), &new_offset.to_string())?;
+            } else {
+                let hash = content_hash(&raw);
+                db.meta_set(&format!("mined:{}", hash), &now.to_string())?;
+            }
         }
     }
 
     Ok(report)
+}
+
+/// Mine every detected agent transcript directory in one pass.
+///
+/// Walks the source registry ([`Source::all`]), and for each source
+/// whose default directory exists under `home`, mines it with the
+/// supplied options (the source field is overridden per directory).
+/// Returns one report per source that was present.
+pub fn mine_all(
+    db: &mut Database,
+    embedder: &dyn Embedder,
+    home: &Path,
+    opts: &MineOptions,
+    now: i64,
+) -> Result<Vec<(Source, MineReport)>> {
+    let mut out = Vec::new();
+    for &src in Source::all() {
+        let Some(dir) = src.default_dir(home) else {
+            continue;
+        };
+        if !dir.is_dir() {
+            continue;
+        }
+        let per = MineOptions {
+            source: src,
+            ..opts.clone()
+        };
+        let report = mine(db, embedder, &dir, &per, now)?;
+        out.push((src, report));
+    }
+    Ok(out)
 }
 
 /// Walk `path` for transcript files. A file path returns itself.
@@ -398,5 +467,104 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, Error::Validation(_)));
+    }
+
+    #[test]
+    fn incremental_only_mines_appended_turns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("live.jsonl");
+        let line1 = concat!(
+            r#"{"kind":"Prompt","data":{"content":[{"kind":"text","data":"remember that I use ruff"}]}}"#,
+            "\n"
+        );
+        std::fs::write(&file, line1).unwrap();
+
+        let mut db = Database::open_in_memory().unwrap();
+        let opts = MineOptions {
+            source: Source::Kiro,
+            incremental: true,
+            ..Default::default()
+        };
+
+        let r1 = mine(&mut db, &NoopEmbedder, &file, &opts, 1_000).unwrap();
+        assert_eq!(r1.memories_approved, 1, "first pass mines the one line");
+
+        // Re-mining with no change yields nothing new.
+        let r2 = mine(&mut db, &NoopEmbedder, &file, &opts, 2_000).unwrap();
+        assert_eq!(r2.memories_approved, 0, "no new content");
+        assert_eq!(r2.files_skipped, 1);
+
+        // Append a new turn; only it should be mined.
+        let mut content = std::fs::read_to_string(&file).unwrap();
+        content.push_str(
+            concat!(r#"{"kind":"Prompt","data":{"content":[{"kind":"text","data":"remember that I prefer tabs"}]}}"#, "\n"),
+        );
+        std::fs::write(&file, content).unwrap();
+
+        let r3 = mine(&mut db, &NoopEmbedder, &file, &opts, 3_000).unwrap();
+        assert_eq!(r3.memories_approved, 1, "only the appended line is mined");
+
+        // Total stored memories: exactly the two distinct lines.
+        let all = crate::memory::list(&db, &Default::default()).unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn incremental_resets_when_file_is_truncated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("rot.jsonl");
+        let big = concat!(
+            r#"{"kind":"Prompt","data":{"content":[{"kind":"text","data":"remember that the original line is long with extra padding here"}]}}"#,
+            "\n"
+        );
+        std::fs::write(&file, big).unwrap();
+
+        let mut db = Database::open_in_memory().unwrap();
+        let opts = MineOptions {
+            source: Source::Kiro,
+            incremental: true,
+            ..Default::default()
+        };
+        mine(&mut db, &NoopEmbedder, &file, &opts, 1_000).unwrap();
+
+        // Replace with a much shorter file (rotation/truncation). The
+        // saved offset now exceeds the new length, so mining restarts
+        // from zero.
+        let small = concat!(
+            r#"{"kind":"Prompt","data":{"content":[{"kind":"text","data":"remember x"}]}}"#,
+            "\n"
+        );
+        assert!(small.len() < big.len());
+        std::fs::write(&file, small).unwrap();
+        let r = mine(&mut db, &NoopEmbedder, &file, &opts, 2_000).unwrap();
+        assert_eq!(
+            r.memories_approved, 1,
+            "truncated file is re-read from start"
+        );
+    }
+
+    #[test]
+    fn mine_all_walks_present_source_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // Create a Copilot transcript in its standard location.
+        let copilot_dir = home.join(".copilot").join("session-state");
+        std::fs::create_dir_all(&copilot_dir).unwrap();
+        std::fs::write(
+            copilot_dir.join("s.jsonl"),
+            concat!(r#"{"type":"user.message","data":{"content":"remember that I deploy with make ship"}}"#, "\n"),
+        )
+        .unwrap();
+
+        let mut db = Database::open_in_memory().unwrap();
+        let opts = MineOptions {
+            incremental: true,
+            ..Default::default()
+        };
+        let reports = mine_all(&mut db, &NoopEmbedder, home, &opts, 1_000).unwrap();
+        // Only Copilot's dir exists, so exactly one report.
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].0, Source::CopilotCli);
+        assert_eq!(reports[0].1.memories_approved, 1);
     }
 }

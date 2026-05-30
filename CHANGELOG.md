@@ -12,7 +12,21 @@ For the conventions used to write entries in this file, see
 
 ### Added
 
-(none)
+- Universal cross-agent auto-capture. `memryzed watch` polls every
+  detected agent transcript directory on an interval and mines new
+  turns incrementally, capturing memories from Kiro CLI, Claude Code,
+  and Copilot CLI without per-agent hooks. `memryzed mine --all`
+  runs one pass across every detected agent.
+- Copilot CLI transcript adapter (`user.message` / `assistant.message`
+  lines with a `data.content` string) under
+  `~/.copilot/session-state/`.
+- A source registry (`Source::all`, `Source::default_dir`) mapping
+  each supported agent to its standard transcript directory, so new
+  agents are added in one place.
+- Incremental mining mode: a per-file byte offset is tracked in the
+  `meta` table so a growing live transcript yields only its newly
+  appended turns on each pass. Truncated or rotated files reset to
+  the start.
 
 ### Changed
 

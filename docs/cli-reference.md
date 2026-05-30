@@ -230,18 +230,36 @@ transcript becomes a session record, and its user turns are run
 through the extractor to propose candidate memories. Idempotent: a
 transcript already mined is skipped unless `--force` is given.
 
-    memryzed mine [<path>] [--source auto|kiro|claude-code] [--dry-run] [--force]
+    memryzed mine [<path>] [--source auto|kiro|claude-code|copilot-cli] [--all] [--dry-run] [--force]
 
 If `<path>` is omitted, the default location for the source is used:
 
     kiro          ~/.kiro/sessions
     claude-code   ~/.claude/projects
+    copilot-cli   ~/.copilot/session-state
 
 Flags:
 
     --source <name>     Transcript format. Default: auto (detects from path).
+    --all               Mine every detected agent transcript directory.
     --dry-run           Parse and report without writing anything.
     --force             Re-mine transcripts even if seen before.
+
+### `memryzed watch`
+
+Continuously capture memories from every detected agent. On each
+interval, mines all known transcript directories incrementally:
+only the turns appended since the previous pass are processed. This
+is the universal auto-capture path and relies only on the transcript
+files agents already write, not on per-agent hooks. Runs until
+interrupted.
+
+    memryzed watch [--interval <seconds>] [--once]
+
+Flags:
+
+    --interval <n>      Seconds between polls. Default: 15.
+    --once              Run a single pass and exit.
 
 ### `memryzed hooks install`
 

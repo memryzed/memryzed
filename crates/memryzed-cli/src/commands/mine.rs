@@ -16,6 +16,7 @@
 //!
 //! Ingests existing conversation transcripts into Memryzed. With no
 //! path, mines the detected source's default transcript location.
+//! With `--all`, mines every detected agent transcript directory.
 
 use std::path::PathBuf;
 
@@ -32,6 +33,7 @@ use crate::exit;
 pub struct Args {
     pub path: Option<PathBuf>,
     pub source: String,
+    pub all: bool,
     pub dry_run: bool,
     pub force: bool,
 }
@@ -46,6 +48,42 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
         .into());
     }
 
+    let mut db = Database::open(&data_dir.db_file())?;
+    let embedder = make_default(&data_dir.models_dir())?;
+    let now = now_epoch_seconds();
+
+    // `--all` walks the registry of every detected agent dir.
+    if args.all {
+        let home = home_dir()?;
+        let opts = MineOptions {
+            source: Source::Auto,
+            threshold: 0.85,
+            dry_run: args.dry_run,
+            force: args.force,
+            incremental: false,
+        };
+        let reports = mining::mine_all(&mut db, embedder.as_ref(), &home, &opts, now)?;
+        if !ctx.quiet {
+            if reports.is_empty() {
+                println!("No agent transcript directories detected.");
+            } else {
+                let mode = if args.dry_run { " (dry run)" } else { "" };
+                println!("Mined all detected agents{mode}");
+                for (src, r) in &reports {
+                    println!(
+                        "  {:<14} found {:>4}  mined {:>4}  approved {:>3}  pending {:>3}",
+                        src.display_name(),
+                        r.files_found,
+                        r.files_mined,
+                        r.memories_approved,
+                        r.memories_pending,
+                    );
+                }
+            }
+        }
+        return Ok(());
+    }
+
     let source: Source = args
         .source
         .parse()
@@ -57,34 +95,27 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
             exit::Coded::new(
                 exit::MISUSE,
                 "no path given and no default location for source 'auto'; \
-                 pass a path or --source kiro|claude-code",
+                 pass a path, use --all, or set --source kiro|claude-code|copilot-cli",
             )
         })?,
     };
 
-    let mut db = Database::open(&data_dir.db_file())?;
-    let embedder = make_default(&data_dir.models_dir())?;
     let opts = MineOptions {
         source,
         threshold: 0.85,
         dry_run: args.dry_run,
         force: args.force,
+        incremental: false,
     };
 
-    let report = mining::mine(
-        &mut db,
-        embedder.as_ref(),
-        &path,
-        &opts,
-        now_epoch_seconds(),
-    )?;
+    let report = mining::mine(&mut db, embedder.as_ref(), &path, &opts, now)?;
 
     if !ctx.quiet {
         let mode = if args.dry_run { " (dry run)" } else { "" };
         println!("Mined {}{}", path.display(), mode);
         println!("  transcripts found:   {}", report.files_found);
         println!("  transcripts mined:   {}", report.files_mined);
-        println!("  already seen:        {}", report.files_skipped);
+        println!("  skipped (no new):    {}", report.files_skipped);
         println!("  sessions written:    {}", report.sessions_written);
         println!("  memories approved:   {}", report.memories_approved);
         println!("  memories pending:    {}", report.memories_pending);
@@ -100,9 +131,14 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
 /// path. `Auto` has no default; the caller errors in that case.
 fn default_path_for(source: Source) -> Option<PathBuf> {
     let home = directories::BaseDirs::new()?.home_dir().to_path_buf();
-    match source {
-        Source::Kiro => Some(home.join(".kiro").join("sessions")),
-        Source::ClaudeCode => Some(home.join(".claude").join("projects")),
-        Source::Auto => None,
-    }
+    source.default_dir(&home)
+}
+
+fn home_dir() -> Result<PathBuf> {
+    directories::BaseDirs::new()
+        .map(|d| d.home_dir().to_path_buf())
+        .ok_or_else(|| {
+            exit::Coded::new(exit::GENERAL_ERROR, "could not determine home directory").into()
+        })
+        .map_err(|e: anyhow::Error| e)
 }

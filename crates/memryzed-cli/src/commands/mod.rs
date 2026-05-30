@@ -31,6 +31,7 @@ mod serve;
 mod sessions;
 mod show;
 mod update;
+mod watch;
 
 use anyhow::Result;
 
@@ -178,6 +179,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Mine {
             path,
             source,
+            all,
             dry_run,
             force,
         } => mine::run(
@@ -185,6 +187,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
             mine::Args {
                 path,
                 source,
+                all,
                 dry_run,
                 force,
             },
@@ -197,6 +200,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 HooksAction::Uninstall => hooks::uninstall(&context),
             }
         }
+
+        Command::Watch { interval, once } => watch::run(&context, watch::Args { interval, once }),
 
         Command::Export { pretty } => data::export(&context, data::ExportArgs { pretty }),
 

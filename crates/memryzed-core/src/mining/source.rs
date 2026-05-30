@@ -19,7 +19,7 @@
 //! into a normalized list of [`Turn`]s. Lines that do not represent a
 //! user or assistant message are ignored.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -34,6 +34,8 @@ pub enum Source {
     Kiro,
     /// Claude Code sessions (`~/.claude/projects/`).
     ClaudeCode,
+    /// Copilot CLI sessions (`~/.copilot/session-state/`).
+    CopilotCli,
 }
 
 impl Source {
@@ -41,6 +43,7 @@ impl Source {
     pub fn parse(self, raw: &str) -> Vec<Turn> {
         match self {
             Source::ClaudeCode => parse_jsonl(raw, claude_line),
+            Source::CopilotCli => parse_jsonl(raw, copilot_line),
             // Auto resolves to Kiro at the file level; treat as Kiro.
             Source::Kiro | Source::Auto => parse_jsonl(raw, kiro_line),
         }
@@ -52,6 +55,34 @@ impl Source {
             Source::Auto => "auto",
             Source::Kiro => "kiro",
             Source::ClaudeCode => "claude-code",
+            Source::CopilotCli => "copilot-cli",
+        }
+    }
+
+    /// Human-readable name for CLI output.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Source::Auto => "Auto",
+            Source::Kiro => "Kiro CLI",
+            Source::ClaudeCode => "Claude Code",
+            Source::CopilotCli => "Copilot CLI",
+        }
+    }
+
+    /// Every concrete source (excludes `Auto`), in stable order. This
+    /// is the registry the universal capture walks.
+    pub fn all() -> &'static [Source] {
+        &[Source::Kiro, Source::ClaudeCode, Source::CopilotCli]
+    }
+
+    /// The standard transcript directory for this source under the
+    /// given home directory. `Auto` has no default.
+    pub fn default_dir(self, home: &Path) -> Option<PathBuf> {
+        match self {
+            Source::Kiro => Some(home.join(".kiro").join("sessions")),
+            Source::ClaudeCode => Some(home.join(".claude").join("projects")),
+            Source::CopilotCli => Some(home.join(".copilot").join("session-state")),
+            Source::Auto => None,
         }
     }
 }
@@ -63,8 +94,9 @@ impl std::str::FromStr for Source {
             "auto" => Ok(Source::Auto),
             "kiro" => Ok(Source::Kiro),
             "claude-code" | "claude" => Ok(Source::ClaudeCode),
+            "copilot-cli" | "copilot" => Ok(Source::CopilotCli),
             other => Err(crate::error::Error::Validation(format!(
-                "unknown mining source {other:?}; expected auto, kiro, or claude-code"
+                "unknown mining source {other:?}; expected auto, kiro, claude-code, or copilot-cli"
             ))),
         }
     }
@@ -76,6 +108,8 @@ pub fn detect_source(path: &Path) -> Option<Source> {
     let s = path.to_string_lossy();
     if s.contains(".claude") {
         Some(Source::ClaudeCode)
+    } else if s.contains(".copilot") {
+        Some(Source::CopilotCli)
     } else if s.contains(".kiro") {
         Some(Source::Kiro)
     } else {
@@ -164,6 +198,31 @@ fn claude_line(v: &Value) -> Option<Turn> {
     })
 }
 
+/// Normalize one Copilot CLI session line.
+///
+/// Copilot lines have a top-level `type`. User and assistant turns
+/// are `user.message` and `assistant.message`, each with a
+/// `data.content` string. All other types (turn markers, tool
+/// execution, session info) are ignored.
+fn copilot_line(v: &Value) -> Option<Turn> {
+    let kind = v.get("type")?.as_str()?;
+    let role = match kind {
+        "user.message" => "user",
+        "assistant.message" => "assistant",
+        _ => return None,
+    };
+    let text = v
+        .get("data")
+        .and_then(|d| d.get("content"))
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
+    Some(Turn {
+        role: role.to_string(),
+        text,
+    })
+}
+
 /// Pull plain text out of a content value that may be a bare string
 /// or an array of `{type, text}` blocks. Non-text blocks (tool calls,
 /// images) are skipped.
@@ -195,7 +254,46 @@ mod tests {
         assert_eq!("kiro".parse::<Source>().unwrap(), Source::Kiro);
         assert_eq!("claude-code".parse::<Source>().unwrap(), Source::ClaudeCode);
         assert_eq!("claude".parse::<Source>().unwrap(), Source::ClaudeCode);
+        assert_eq!("copilot-cli".parse::<Source>().unwrap(), Source::CopilotCli);
+        assert_eq!("copilot".parse::<Source>().unwrap(), Source::CopilotCli);
         assert!("wat".parse::<Source>().is_err());
+    }
+
+    #[test]
+    fn registry_lists_all_concrete_sources_with_dirs() {
+        let home = Path::new("/home/x");
+        let all = Source::all();
+        assert_eq!(all.len(), 3);
+        assert!(!all.contains(&Source::Auto));
+        for s in all {
+            assert!(s.default_dir(home).is_some(), "{s:?} needs a default dir");
+        }
+        assert!(Source::Auto.default_dir(home).is_none());
+        assert_eq!(
+            Source::CopilotCli.default_dir(home).unwrap(),
+            Path::new("/home/x/.copilot/session-state")
+        );
+    }
+
+    #[test]
+    fn copilot_parses_user_and_assistant_messages() {
+        let raw = concat!(
+            r#"{"type":"session.start","data":{"sessionId":"x"}}"#,
+            "\n",
+            r#"{"type":"user.message","data":{"content":"I prefer ruff for linting"}}"#,
+            "\n",
+            r#"{"type":"assistant.turn_start","data":{"turnId":"0"}}"#,
+            "\n",
+            r#"{"type":"assistant.message","data":{"content":"Got it."}}"#,
+            "\n",
+            r#"{"type":"tool.execution_start","data":{}}"#,
+        );
+        let turns = Source::CopilotCli.parse(raw);
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].role, "user");
+        assert_eq!(turns[0].text, "I prefer ruff for linting");
+        assert_eq!(turns[1].role, "assistant");
+        assert_eq!(turns[1].text, "Got it.");
     }
 
     #[test]
@@ -207,6 +305,10 @@ mod tests {
         assert_eq!(
             detect_source(Path::new("/home/x/.kiro/sessions/a.jsonl")),
             Some(Source::Kiro)
+        );
+        assert_eq!(
+            detect_source(Path::new("/home/x/.copilot/session-state/a.jsonl")),
+            Some(Source::CopilotCli)
         );
         assert_eq!(detect_source(Path::new("/tmp/random.jsonl")), None);
     }
