@@ -39,6 +39,105 @@ use memryzed_core::memory::{
 use memryzed_core::retrieval::{search as retrieval_search, SearchOptions};
 use memryzed_core::{extractor, projects, sessions, Database};
 
+/// Spawn the background capture-and-index engine on a dedicated OS
+/// thread.
+///
+/// This is what makes Memryzed work with no commands beyond install:
+/// the agent spawns `serve`, which calls this, and the engine then
+/// runs entirely on its own thread with its own SQLite connection.
+/// Keeping it off the async MCP runtime is deliberate: embedding is
+/// blocking CPU work, and running it here means it can never stall
+/// tool calls or saturate the protocol threads.
+///
+/// The engine is gentle by design. Embedding is the expensive part,
+/// so each batch is small and followed by a sleep, capping CPU use at
+/// a fraction of one core. A first-run backfill therefore takes
+/// longer but stays invisible: no fan spin, no contention. Capture
+/// (mining new turns) runs only periodically. Everything is
+/// idempotent and resumable, so a restart simply continues.
+///
+/// The thread is detached; it exits when the process does. Errors are
+/// logged, never propagated.
+pub fn spawn_engine(data_dir: memryzed_core::DataDir, home: std::path::PathBuf) {
+    std::thread::Builder::new()
+        .name("memryzed-engine".into())
+        .spawn(move || engine_loop(data_dir, home))
+        .ok();
+}
+
+fn engine_loop(data_dir: memryzed_core::DataDir, home: std::path::PathBuf) {
+    use memryzed_core::mining::{mine_all, MineOptions, Source};
+    use std::time::{Duration, Instant};
+
+    // Episodes embedded per batch. Small, so each unit of work is
+    // short and interruptible.
+    const REINDEX_BATCH: usize = 16;
+    // Sleep after each embed batch. This is the throttle: with a
+    // batch of 16 and a 400 ms pause, embedding uses well under half
+    // of one core, leaving the machine responsive.
+    const EMBED_PAUSE_MS: u64 = 400;
+    // Capture new transcript content at most this often.
+    const CAPTURE_EVERY: Duration = Duration::from_secs(30);
+    // Poll interval when there is nothing to embed.
+    const IDLE: Duration = Duration::from_secs(15);
+
+    // The engine owns its own connection and embedder, independent of
+    // the MCP server. WAL mode allows this second connection to the
+    // same database file.
+    let mut db = match Database::open(&data_dir.db_file()) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(target: "memryzed::engine", error = %e, "engine could not open db");
+            return;
+        }
+    };
+    let embedder = make_default(&data_dir.models_dir()).ok();
+
+    let mut last_capture = Instant::now()
+        .checked_sub(CAPTURE_EVERY)
+        .unwrap_or_else(Instant::now);
+
+    loop {
+        // 1. Capture new conversation text, periodically and text-only
+        //    (instant). Idempotent and incremental.
+        if last_capture.elapsed() >= CAPTURE_EVERY {
+            let opts = MineOptions {
+                source: Source::Auto,
+                threshold: 0.85,
+                dry_run: false,
+                force: false,
+                incremental: true,
+            };
+            let noop = memryzed_core::NoopEmbedder;
+            if let Err(e) = mine_all(&mut db, &noop, &home, &opts, now_epoch_seconds()) {
+                tracing::warn!(target: "memryzed::engine", error = %e, "capture failed");
+            }
+            last_capture = Instant::now();
+        }
+
+        // 2. Embed one small batch, then pause. When nothing was
+        //    embedded, idle longer.
+        let embedded = match &embedder {
+            Some(e) if e.is_active() => {
+                match memryzed_core::episodes::reindex_pending(&mut db, e.as_ref(), REINDEX_BATCH) {
+                    Ok(n) => n,
+                    Err(err) => {
+                        tracing::warn!(target: "memryzed::engine", error = %err, "reindex failed");
+                        0
+                    }
+                }
+            }
+            _ => 0,
+        };
+
+        if embedded > 0 {
+            std::thread::sleep(Duration::from_millis(EMBED_PAUSE_MS));
+        } else {
+            std::thread::sleep(IDLE);
+        }
+    }
+}
+
 /// State shared across every tool call.
 ///
 /// The database is wrapped in a tokio `Mutex` because rusqlite
@@ -112,75 +211,11 @@ impl MemryzedServer {
     /// Errors are logged, never fatal: the agent's session must not
     /// be affected by a background hiccup.
     pub async fn run_background_engine(&self, home: std::path::PathBuf) {
-        use memryzed_core::mining::{mine_all, MineOptions, Source};
-
-        // Episodes embedded per reindex call.
-        const REINDEX_PER_CYCLE: usize = 128;
-        // Capture (mine transcripts) at most this often. New turns
-        // arrive slowly, and a full mine pass is the expensive part,
-        // so it must not run on every reindex iteration.
-        const CAPTURE_EVERY_SECS: u64 = 30;
-        // Idle poll once the embedding backlog is drained.
-        const IDLE_SECS: u64 = 10;
-
-        let inner = self.inner.clone();
-        let mut last_capture = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_secs(CAPTURE_EVERY_SECS))
-            .unwrap_or_else(std::time::Instant::now);
-
-        loop {
-            // 1. Capture new conversation text, but only periodically.
-            if last_capture.elapsed().as_secs() >= CAPTURE_EVERY_SECS {
-                let mut db = inner.db.lock().await;
-                let opts = MineOptions {
-                    source: Source::Auto,
-                    threshold: 0.85,
-                    dry_run: false,
-                    force: false,
-                    incremental: true,
-                };
-                if let Err(e) = mine_all(
-                    &mut db,
-                    inner.embedder.as_ref(),
-                    &home,
-                    &opts,
-                    now_epoch_seconds(),
-                ) {
-                    tracing::warn!(target: "memryzed::engine", error = %e, "capture cycle failed");
-                }
-                drop(db);
-                last_capture = std::time::Instant::now();
-            }
-
-            // 2. Embed a batch. If a full batch came back there is more
-            //    backlog, so loop again immediately (after a tiny yield
-            //    so tool calls are not starved). Otherwise idle-wait.
-            let mut drained_full = false;
-            if inner.embedder.is_active() {
-                let mut db = inner.db.lock().await;
-                match memryzed_core::episodes::reindex_pending(
-                    &mut db,
-                    inner.embedder.as_ref(),
-                    REINDEX_PER_CYCLE,
-                ) {
-                    Ok(n) => {
-                        if n > 0 {
-                            tracing::debug!(target: "memryzed::engine", embedded = n, "reindex batch");
-                        }
-                        drained_full = n >= REINDEX_PER_CYCLE;
-                    }
-                    Err(e) => {
-                        tracing::warn!(target: "memryzed::engine", error = %e, "reindex cycle failed");
-                    }
-                }
-            }
-
-            if drained_full {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            } else {
-                tokio::time::sleep(std::time::Duration::from_secs(IDLE_SECS)).await;
-            }
-        }
+        let _ = home;
+        // Superseded by `spawn_engine`, which runs the engine on a
+        // dedicated OS thread with its own database connection so the
+        // blocking embedding work never touches the async MCP runtime.
+        // Kept as a no-op for API stability.
     }
 
     /// Test helper: set the active project id.

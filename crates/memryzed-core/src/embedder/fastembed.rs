@@ -56,6 +56,23 @@ impl FastembedEmbedder {
         }
         let cache_dir = cache_dir.to_path_buf();
 
+        // Cap the inference thread pools so embedding stays a gentle
+        // background task instead of saturating every core. ONNX
+        // Runtime reads OMP/intra-op thread counts from these env
+        // vars at session creation; we set them unless the user has
+        // already chosen a value. Two threads keeps throughput
+        // reasonable while leaving the machine responsive.
+        const EMBED_THREADS: &str = "2";
+        for var in [
+            "OMP_NUM_THREADS",
+            "ORT_INTRA_OP_NUM_THREADS",
+            "RAYON_NUM_THREADS",
+        ] {
+            if std::env::var_os(var).is_none() {
+                std::env::set_var(var, EMBED_THREADS);
+            }
+        }
+
         let options = InitOptions::new(EmbeddingModel::BGESmallENV15)
             .with_cache_dir(cache_dir.clone())
             .with_show_download_progress(true);

@@ -42,14 +42,22 @@ pub fn run(ctx: &Context) -> Result<()> {
         std::fs::create_dir_all(data_dir.models_dir()).ok();
     }
 
-    // The engine runs concurrently with the MCP loop, so a
-    // multi-thread runtime is used: one task serves the protocol on
-    // stdio, another captures and embeds in the background.
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+    // The MCP protocol is request/response; a current-thread runtime
+    // is enough. The background engine runs on its own OS thread (see
+    // spawn_engine), not on this runtime, so blocking embedding work
+    // never touches the protocol.
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("constructing tokio runtime")?;
+
+    // Spawn the background capture-and-index engine before serving.
+    // This is what makes Memryzed work with no commands beyond
+    // install: the agent spawned this process, and the engine runs
+    // behind the session on its own thread.
+    if let Some(home) = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()) {
+        memryzed_mcp::spawn_engine(data_dir.clone(), home);
+    }
 
     runtime.block_on(async move {
         let server = MemryzedServer::open(&data_dir)?;
@@ -58,18 +66,6 @@ pub fn run(ctx: &Context) -> Result<()> {
             data_dir = %data_dir.root().display(),
             "memryzed serve ready"
         );
-
-        // Spawn the background capture-and-index engine. This is what
-        // makes Memryzed work with no commands beyond install: the
-        // agent spawned this process, and the engine runs behind the
-        // MCP session. Disabled when there is no home directory.
-        if let Some(home) = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()) {
-            let engine = server.clone();
-            tokio::spawn(async move {
-                engine.run_background_engine(home).await;
-            });
-        }
-
         let service = server
             .serve(stdio())
             .await
