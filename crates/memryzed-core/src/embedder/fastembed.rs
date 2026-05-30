@@ -15,12 +15,54 @@
 //! `fastembed-rs` integration.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 use crate::embedder::Embedder;
 use crate::error::{Error, Result};
+
+/// Commit a global ONNX Runtime environment whose thread pool is
+/// capped, so embedding never saturates the machine. Runs at most
+/// once per process; subsequent calls are no-ops.
+///
+/// The intra-op thread count is capped at min(2, cores). The global
+/// environment must be committed before any session is created for
+/// the cap to apply, which is why this is called at the very start of
+/// embedder load. Best-effort: failures are logged and ignored.
+fn init_capped_thread_pool() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        let cap = std::thread::available_parallelism()
+            .map(|n| n.get().min(2))
+            .unwrap_or(1);
+        let result = (|| -> ort::Result<bool> {
+            let pool = ort::environment::GlobalThreadPoolOptions::default()
+                .with_intra_threads(cap)?
+                .with_inter_threads(1)?;
+            Ok(ort::init()
+                .with_name("memryzed")
+                .with_global_thread_pool(pool)
+                .commit())
+        })();
+        match result {
+            Ok(true) => tracing::debug!(
+                target: "memryzed::embedder",
+                intra_threads = cap,
+                "committed capped global ONNX thread pool",
+            ),
+            Ok(false) => tracing::debug!(
+                target: "memryzed::embedder",
+                "global ONNX environment already committed; cap not applied",
+            ),
+            Err(e) => tracing::warn!(
+                target: "memryzed::embedder",
+                error = %e,
+                "could not cap ONNX thread pool; embedding may use more CPU",
+            ),
+        }
+    });
+}
 
 /// Stable model identifier stored alongside every embedding.
 ///
@@ -56,22 +98,15 @@ impl FastembedEmbedder {
         }
         let cache_dir = cache_dir.to_path_buf();
 
-        // Cap the inference thread pools so embedding stays a gentle
-        // background task instead of saturating every core. ONNX
-        // Runtime reads OMP/intra-op thread counts from these env
-        // vars at session creation; we set them unless the user has
-        // already chosen a value. Two threads keeps throughput
-        // reasonable while leaving the machine responsive.
-        const EMBED_THREADS: &str = "2";
-        for var in [
-            "OMP_NUM_THREADS",
-            "ORT_INTRA_OP_NUM_THREADS",
-            "RAYON_NUM_THREADS",
-        ] {
-            if std::env::var_os(var).is_none() {
-                std::env::set_var(var, EMBED_THREADS);
-            }
-        }
+        // Cap how many cores ONNX Runtime uses for inference, so
+        // embedding stays a gentle background task instead of
+        // saturating every core. This is done by committing a global
+        // ONNX thread pool with a small intra-op thread count before
+        // any session is created; fastembed's session then uses it.
+        // Idempotent and best-effort: if a global environment was
+        // already committed (or commit fails), we proceed with the
+        // default and just accept higher CPU rather than failing.
+        init_capped_thread_pool();
 
         let options = InitOptions::new(EmbeddingModel::BGESmallENV15)
             .with_cache_dir(cache_dir.clone())

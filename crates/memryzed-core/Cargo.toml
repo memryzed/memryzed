@@ -25,6 +25,7 @@ hex.workspace = true
 rand.workspace = true
 time.workspace = true
 fastembed.workspace = true
+ort = { version = "=2.0.0-rc.12", default-features = false }
 regex.workspace = true
 ureq.workspace = true
 

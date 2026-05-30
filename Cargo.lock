@@ -1507,6 +1507,7 @@ dependencies = [
  "directories",
  "fastembed",
  "hex",
+ "ort",
  "rand 0.8.6",
  "regex",
  "rusqlite",
