@@ -199,7 +199,10 @@ pub fn mine(
 /// Walks the source registry ([`Source::all`]), and for each source
 /// whose default directory exists under `home`, mines it with the
 /// supplied options (the source field is overridden per directory).
-/// Returns one report per source that was present.
+/// Returns one report per source that was present. A source that
+/// errors does not abort the others: its error is logged and the
+/// walk continues, so one malformed agent directory cannot block
+/// importing the rest.
 pub fn mine_all(
     db: &mut Database,
     embedder: &dyn Embedder,
@@ -219,8 +222,17 @@ pub fn mine_all(
             source: src,
             ..opts.clone()
         };
-        let report = mine(db, embedder, &dir, &per, now)?;
-        out.push((src, report));
+        match mine(db, embedder, &dir, &per, now) {
+            Ok(report) => out.push((src, report)),
+            Err(e) => {
+                tracing::warn!(
+                    target: "memryzed::mining",
+                    source = src.as_str(),
+                    error = %e,
+                    "mining source failed; continuing with remaining sources",
+                );
+            }
+        }
     }
     Ok(out)
 }
@@ -341,15 +353,20 @@ fn mining_project_dir() -> PathBuf {
     PathBuf::from("memryzed://mined")
 }
 
-/// Capture each substantive turn as an episodic memory. This is the
-/// cross-agent continuity layer: verbatim turns embedded for semantic
-/// recall, regardless of which agent later asks. Trivial turns are
-/// skipped via [`episodes::is_substantive`]. All turns in the file are
-/// embedded in one batched call for speed.
-#[allow(clippy::too_many_arguments)]
+/// Capture each substantive turn as an episode. This is the
+/// cross-agent continuity layer: verbatim turns stored for later
+/// semantic recall, regardless of which agent asks. Trivial turns
+/// are skipped via [`episodes::is_substantive`].
+///
+/// Capture is text-only and therefore instant; the vector embeddings
+/// are filled in afterward by the background indexer
+/// ([`episodes::reindex_pending`]). This is what keeps mining and the
+/// first-run import from ever blocking on the embedding model. The
+/// `embedder` argument is unused here and kept for signature
+/// stability with the rest of the mining pipeline.
 fn capture_episodes(
     db: &mut Database,
-    embedder: &dyn Embedder,
+    _embedder: &dyn Embedder,
     source: Source,
     turns: &[Turn],
     file: &Path,
@@ -376,7 +393,7 @@ fn capture_episodes(
     if dry_run {
         return Ok(batch.len());
     }
-    episodes::insert_batch(db, &batch, embedder, now)
+    episodes::insert_batch_text_only(db, &batch, now)
 }
 
 /// Stable content hash for idempotency. Uses the same SHA-256 helper

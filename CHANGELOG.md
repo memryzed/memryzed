@@ -12,6 +12,19 @@ For the conventions used to write entries in this file, see
 
 ### Added
 
+- Background capture-and-index engine. The MCP server (`memryzed
+  serve`, which agents spawn automatically) now runs a background
+  loop that captures new conversation from every detected agent and
+  embeds it, with no user commands required beyond install. Capture
+  is text-only and therefore instant; embeddings are filled in
+  lazily on a background thread, so nothing ever blocks. `memryzed
+  init` returns in well under a second even on a machine with a
+  large agent history, and that history is imported and embedded in
+  the background while the agent runs.
+- `episodes::insert_batch_text_only` for instant capture and
+  `episodes::reindex_pending` for resumable, interruptible
+  background embedding (embeds episodes whose vector is missing or
+  was produced by a different model).
 - Episodic memory: verbatim conversation turns for cross-agent
   continuity. Mining now captures each substantive turn from a
   transcript as an embedded `episode`, stored in a new `episodes`

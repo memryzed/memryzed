@@ -42,9 +42,11 @@ pub fn run(ctx: &Context) -> Result<()> {
         std::fs::create_dir_all(data_dir.models_dir()).ok();
     }
 
-    // Build a single-threaded current-thread runtime; the protocol
-    // is request/response and we do not need a multi-threaded pool.
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    // The engine runs concurrently with the MCP loop, so a
+    // multi-thread runtime is used: one task serves the protocol on
+    // stdio, another captures and embeds in the background.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
         .enable_all()
         .build()
         .context("constructing tokio runtime")?;
@@ -56,6 +58,18 @@ pub fn run(ctx: &Context) -> Result<()> {
             data_dir = %data_dir.root().display(),
             "memryzed serve ready"
         );
+
+        // Spawn the background capture-and-index engine. This is what
+        // makes Memryzed work with no commands beyond install: the
+        // agent spawned this process, and the engine runs behind the
+        // MCP session. Disabled when there is no home directory.
+        if let Some(home) = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()) {
+            let engine = server.clone();
+            tokio::spawn(async move {
+                engine.run_background_engine(home).await;
+            });
+        }
+
         let service = server
             .serve(stdio())
             .await

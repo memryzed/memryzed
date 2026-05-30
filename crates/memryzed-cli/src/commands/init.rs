@@ -75,19 +75,15 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
     db.integrity_check()
         .with_context(|| "post-init integrity check failed")?;
 
-    // Warm-load the embedding model. Skipped if MEMRYZED_DISABLE_EMBEDDING is set.
-    let embedder_status = if std::env::var(ENV_DISABLE).is_ok() {
+    // Warm-load the embedding model, keeping the handle for backfill.
+    // Skipped if MEMRYZED_DISABLE_EMBEDDING is set.
+    let embedding_disabled = std::env::var(ENV_DISABLE).is_ok();
+    let embedder_status = if embedding_disabled {
         EmbedderInit::Skipped
-    } else if !ctx.quiet {
-        println!("Loading embedding model (downloads on first run)...");
-        match make_default(&data_dir.models_dir()) {
-            Ok(e) => EmbedderInit::Loaded {
-                model: e.model_id().to_string(),
-                dim: e.dimension(),
-            },
-            Err(e) => EmbedderInit::Failed(e.to_string()),
-        }
     } else {
+        if !ctx.quiet {
+            println!("Loading embedding model (downloads on first run)...");
+        }
         match make_default(&data_dir.models_dir()) {
             Ok(e) => EmbedderInit::Loaded {
                 model: e.model_id().to_string(),
@@ -140,11 +136,16 @@ pub fn run(ctx: &Context, _yes: bool) -> Result<()> {
                 println!("Memryzed will store memories without embeddings until this resolves.");
             }
         }
+    }
+
+    if !ctx.quiet {
         println!();
         println!("Memryzed is initialized.");
         println!(
-            "Run `memryzed doctor` to verify, or `memryzed --help` for the full command list."
+            "Your agent history is imported and embedded automatically in the \
+             background while your agent runs. No further commands are needed."
         );
+        println!("Run `memryzed doctor` to verify, or `memryzed --help` for all commands.");
     }
 
     Ok(())

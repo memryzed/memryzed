@@ -37,6 +37,11 @@ use crate::storage::Database;
 /// Filters out "ok", "yes", "continue", and similar noise.
 pub const MIN_EPISODE_CHARS: usize = 24;
 
+/// How many turns to embed per call. Bounds memory and latency on
+/// transcripts with thousands of turns while keeping the batching
+/// speedup over one-at-a-time embedding.
+pub const EMBED_BATCH: usize = 32;
+
 /// A stored conversation turn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Episode {
@@ -126,11 +131,12 @@ pub fn insert(
     })
 }
 
-/// Capture many episodes at once, embedding all of them in a single
-/// batched call to the embedder. This is dramatically faster than
-/// inserting one at a time, because fastembed processes a batch in
-/// roughly the time of a few singles. All inserts share one
-/// transaction. Returns the number stored.
+/// Capture many episodes at once, embedding them in fixed-size
+/// batches. Batching is far faster than one-at-a-time, but an
+/// unbounded batch (a transcript with thousands of turns) can
+/// exhaust memory or stall the model, so turns are embedded in
+/// chunks of [`EMBED_BATCH`]. All inserts share one transaction.
+/// Returns the number stored.
 ///
 /// `base_now` is the timestamp of the first episode; each subsequent
 /// one is `base_now + index` so within-batch order is preserved.
@@ -144,13 +150,17 @@ pub fn insert_batch(
         return Ok(0);
     }
 
-    // One batched embedding call for every turn.
-    let texts: Vec<&str> = new.iter().map(|e| e.content.as_str()).collect();
-    let embeddings = if embedder.is_active() {
-        embedder.embed(&texts)?
-    } else {
-        Vec::new()
-    };
+    // Embed in bounded chunks, one vector per input (empty entries
+    // when the embedder is inactive).
+    let mut embeddings: Vec<Vec<f32>> = Vec::with_capacity(new.len());
+    if embedder.is_active() {
+        for chunk in new.chunks(EMBED_BATCH) {
+            let texts: Vec<&str> = chunk.iter().map(|e| e.content.as_str()).collect();
+            let mut out = embedder.embed(&texts)?;
+            out.resize(chunk.len(), Vec::new());
+            embeddings.extend(out);
+        }
+    }
     let model = embedder.model_id();
 
     let tx = db.conn_mut().transaction()?;
@@ -186,6 +196,103 @@ pub fn insert_batch(
     }
     tx.commit()?;
     Ok(new.len())
+}
+
+/// Capture many episodes without embedding them. Storing text is
+/// effectively instant (thousands of rows in well under a second),
+/// and the FTS index makes them keyword-searchable immediately. The
+/// vector embeddings are filled in later by [`reindex_pending`],
+/// run on a background thread by the server. This is what keeps
+/// `init` and capture from ever blocking on the embedding model.
+pub fn insert_batch_text_only(
+    db: &mut Database,
+    new: &[NewEpisode],
+    base_now: i64,
+) -> Result<usize> {
+    if new.is_empty() {
+        return Ok(0);
+    }
+    let tx = db.conn_mut().transaction()?;
+    for (i, ep) in new.iter().enumerate() {
+        let id = new_episode_id();
+        tx.execute(
+            "INSERT INTO episodes
+                (id, role, content, source_agent, session_ref, project_id, created_at, model, dim, embedding)
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL, NULL, NULL)",
+            params![
+                id,
+                ep.role,
+                ep.content,
+                ep.source_agent,
+                ep.session_ref,
+                base_now + i as i64,
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(new.len())
+}
+
+/// Number of episodes still awaiting an embedding under the active
+/// model. Used by the background indexer to know if there is work.
+pub fn pending_embedding_count(db: &Database, model: &str) -> Result<i64> {
+    Ok(db.conn().query_row(
+        "SELECT count(*) FROM episodes WHERE embedding IS NULL OR model IS NULL OR model != ?1",
+        params![model],
+        |r| r.get(0),
+    )?)
+}
+
+/// Embed up to `limit` episodes that have no embedding yet, in a
+/// single batched model call, and store the vectors. Returns the
+/// number embedded. Designed to be called repeatedly until it
+/// returns 0, so it is fully resumable and interruptible: a cancelled
+/// run just leaves the remaining episodes for next time.
+pub fn reindex_pending(db: &mut Database, embedder: &dyn Embedder, limit: usize) -> Result<usize> {
+    if !embedder.is_active() || limit == 0 {
+        return Ok(0);
+    }
+    let model = embedder.model_id().to_string();
+
+    // Pull a batch of un-embedded ids and their text.
+    let rows: Vec<(String, String)> = {
+        let mut stmt = db.conn().prepare(
+            "SELECT id, content FROM episodes
+              WHERE embedding IS NULL OR model IS NULL OR model != ?1
+              ORDER BY created_at ASC
+              LIMIT ?2",
+        )?;
+        let mapped = stmt.query_map(params![model, limit as i64], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut v = Vec::new();
+        for r in mapped {
+            v.push(r?);
+        }
+        v
+    };
+    if rows.is_empty() {
+        return Ok(0);
+    }
+
+    let texts: Vec<&str> = rows.iter().map(|(_, c)| c.as_str()).collect();
+    let mut embeddings = embedder.embed(&texts)?;
+    embeddings.resize(rows.len(), Vec::new());
+
+    let tx = db.conn_mut().transaction()?;
+    let mut done = 0;
+    for ((id, _), vec) in rows.iter().zip(embeddings.iter()) {
+        if vec.is_empty() {
+            continue;
+        }
+        tx.execute(
+            "UPDATE episodes SET model = ?1, dim = ?2, embedding = ?3 WHERE id = ?4",
+            params![model, vec.len() as i64, embedding_to_bytes(vec), id],
+        )?;
+        done += 1;
+    }
+    tx.commit()?;
+    Ok(done)
 }
 
 /// Look up an episode by id.
