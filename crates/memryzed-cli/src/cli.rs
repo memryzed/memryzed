@@ -239,6 +239,31 @@ pub enum Command {
         action: Option<ConfigAction>,
     },
 
+    /// Ingest existing agent conversation transcripts into Memryzed.
+    Mine {
+        /// Path to a transcript file or a directory of transcripts.
+        /// Defaults to the detected source's standard location.
+        path: Option<PathBuf>,
+
+        /// Transcript source format: auto, kiro, or claude-code.
+        #[arg(long, value_name = "SOURCE", default_value = "auto")]
+        source: String,
+
+        /// Parse and report without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Re-mine transcripts even if seen before.
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Install or remove Claude Code auto-save hooks.
+    Hooks {
+        #[command(subcommand)]
+        action: HooksAction,
+    },
+
     /// Export all data to JSON on stdout.
     Export {
         /// Pretty-print the JSON output.
@@ -278,4 +303,17 @@ pub enum ConfigAction {
     },
     /// Open the configuration file in $EDITOR.
     Edit,
+}
+
+/// Subcommands for `memryzed hooks`.
+#[derive(Debug, Subcommand)]
+pub enum HooksAction {
+    /// Generate the hook scripts and wire them into Claude Code.
+    Install {
+        /// Do not prompt for confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Remove Memryzed hooks from Claude Code (scripts are kept).
+    Uninstall,
 }

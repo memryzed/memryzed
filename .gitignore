@@ -3,7 +3,7 @@
 **/target/
 **/*.rs.bk
 *.pdb
-
+.s*
 # IDE / editor
 .idea/
 .vscode/

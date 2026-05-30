@@ -223,6 +223,44 @@ Show or edit the configuration.
 
 ## Data commands
 
+### `memryzed mine`
+
+Ingest existing agent conversation transcripts into Memryzed. Each
+transcript becomes a session record, and its user turns are run
+through the extractor to propose candidate memories. Idempotent: a
+transcript already mined is skipped unless `--force` is given.
+
+    memryzed mine [<path>] [--source auto|kiro|claude-code] [--dry-run] [--force]
+
+If `<path>` is omitted, the default location for the source is used:
+
+    kiro          ~/.kiro/sessions
+    claude-code   ~/.claude/projects
+
+Flags:
+
+    --source <name>     Transcript format. Default: auto (detects from path).
+    --dry-run           Parse and report without writing anything.
+    --force             Re-mine transcripts even if seen before.
+
+### `memryzed hooks install`
+
+Generate the Claude Code auto-save hook scripts under
+`~/.memryzed/hooks/` and wire them into `~/.claude/settings.json`.
+Two hooks are installed: a periodic checkpoint and a pre-compaction
+hook. Existing settings and hooks are preserved; the settings file
+is backed up first.
+
+Flags:
+
+    --yes               Do not prompt for confirmation.
+
+### `memryzed hooks uninstall`
+
+Remove Memryzed's hooks from Claude Code. Only Memryzed's entries
+are removed; other hooks and settings are left untouched. The
+generated scripts are kept on disk.
+
 ### `memryzed export`
 
 Export all data to JSON on stdout.

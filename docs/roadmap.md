@@ -28,51 +28,38 @@ implementation.
 
 ## Next: v1.x maintenance and polish
 
-After v1.0 ships, the immediate focus combines real-world bug fixing
-with three named features that close the largest gaps against
-existing memory tools:
+Three named features that closed the largest gaps against existing
+memory tools have shipped in 0.5.0:
 
-### Transcript mining
+### Transcript mining (shipped in 0.5.0)
 
 `memryzed mine <path>` ingests existing conversation transcripts
-into Memryzed as session records and candidate memories. Initial
-formats:
+into Memryzed as session records and candidate memories. Supports
+Kiro CLI session JSONL (`~/.kiro/sessions`) and Claude Code session
+JSONL (`~/.claude/projects`), with source auto-detection, dry-run,
+and idempotent re-runs. Additional source formats (Codex, Cursor,
+Continue) are added as their layouts are confirmed.
 
-- Claude Code session JSONLs at `~/.claude/projects/`.
-- Codex CLI session files.
-- Cursor and Continue chat history where the format is documented.
+### Auto-save hooks for Claude Code (shipped in 0.5.0)
 
-Each ingested transcript becomes a session in the appropriate
-project and feeds the extractor for candidate memories. Idempotent
-on re-run. Solves the "I have months of agent history I want
-indexed" problem on day one for new users.
+`memryzed hooks install` wires two hooks into Claude Code: a
+periodic checkpoint and a pre-compaction hook, both of which mine
+the active transcript so memory stays current without the user
+asking. Equivalents for other clients are added as their hook
+surfaces stabilize.
 
-### Auto-save hooks for Claude Code
+### Quality benchmarks harness (shipped in 0.5.0)
 
-A pair of hooks that run inside Claude Code to keep Memryzed up to
-date without explicit user action:
-
-- A periodic checkpoint hook that calls `checkpoint` every N
-  conversation turns.
-- A pre-compaction hook that calls `checkpoint` before Claude Code
-  truncates context, so nothing is lost when context runs out.
-
-Wired automatically by `memryzed install` for Claude Code.
-Equivalents for other clients added as their hook surfaces
-stabilize.
-
-### Quality benchmarks publication
-
-The first public quality numbers, run on the v1.0 implementation
-against standard datasets (LongMemEval, LoCoMo, MemBench, ConvoMem)
-with the methodology in `docs/specs/benchmarks.md`. Honest
-reporting of wins, losses, and the conditions under which each
-applies. Publishing benchmarks builds credibility and gives users
-a concrete reason to choose Memryzed.
+The `memryzed-bench` harness measures recall at K against a
+normalized dataset. The first published numbers, run against
+LongMemEval, LoCoMo, ConvoMem, and MemBench with the methodology in
+`docs/specs/benchmarks.md`, are still to come: they require
+converting each license-gated dataset to the normalized format and
+running with the embedding model active.
 
 ### Maintenance work
 
-Alongside the named features:
+Ongoing alongside the named features:
 
 - Bug fixes from real-world usage.
 - More MCP clients auto-detected as their configurations stabilize.

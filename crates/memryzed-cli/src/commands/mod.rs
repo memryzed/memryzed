@@ -18,10 +18,12 @@ mod config;
 mod data;
 mod doctor;
 mod forget;
+mod hooks;
 mod init;
 mod install;
 mod list;
 mod log;
+mod mine;
 mod remember;
 mod review;
 mod search;
@@ -171,6 +173,29 @@ pub fn dispatch(cli: Cli) -> Result<()> {
                 Some(ConfigAction::Edit) => config::Action::Edit,
             };
             config::run(&context, action)
+        }
+
+        Command::Mine {
+            path,
+            source,
+            dry_run,
+            force,
+        } => mine::run(
+            &context,
+            mine::Args {
+                path,
+                source,
+                dry_run,
+                force,
+            },
+        ),
+
+        Command::Hooks { action } => {
+            use crate::cli::HooksAction;
+            match action {
+                HooksAction::Install { yes } => hooks::install(&context, yes),
+                HooksAction::Uninstall => hooks::uninstall(&context),
+            }
         }
 
         Command::Export { pretty } => data::export(&context, data::ExportArgs { pretty }),

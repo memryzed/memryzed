@@ -34,6 +34,35 @@ For the conventions used to write entries in this file, see
 
 (none)
 
+## [0.5.0] - 2026-05-30
+
+### Added
+
+- Transcript mining. `memryzed mine <path>` ingests existing agent
+  conversation transcripts into Memryzed: each transcript becomes a
+  session record and its user turns are run through the extractor to
+  propose candidate memories. Supports Kiro CLI session JSONL
+  (`~/.kiro/sessions`) and Claude Code session JSONL
+  (`~/.claude/projects`), with `--source auto|kiro|claude-code`,
+  `--dry-run`, and `--force`. Idempotent across runs via a content
+  hash recorded in the `meta` table.
+- Claude Code auto-save hooks. `memryzed hooks install` generates two
+  hook scripts (a periodic checkpoint on the Stop event and a
+  pre-compaction hook) under `~/.memryzed/hooks/` and wires them into
+  `~/.claude/settings.json`, preserving any existing hooks and
+  settings. `memryzed hooks uninstall` removes only Memryzed's
+  entries. The scripts mine the active transcript so recent turns
+  become memories without the user asking.
+- Quality benchmark harness (`benchmarks/`, the `memryzed-bench`
+  binary). Loads a normalized dataset, stores every document in a
+  fresh in-memory store, runs each question through hybrid retrieval,
+  and reports recall at K as JSON. Datasets are not committed; the
+  harness reads a normalized JSON format documented in
+  `benchmarks/README.md`. Methodology and honesty rules are in
+  `docs/specs/benchmarks.md`.
+- `Database::meta_get` and `Database::meta_set` for reading and
+  writing the `meta` key-value table, used by mining for idempotency.
+
 ## [0.4.0] - 2026-05-29
 
 ### Added

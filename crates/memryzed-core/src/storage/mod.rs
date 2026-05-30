@@ -106,6 +106,30 @@ impl Database {
             .pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0))?;
         Ok(v)
     }
+
+    /// Read a value from the `meta` key-value table.
+    pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
+        use rusqlite::OptionalExtension;
+        self.conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                rusqlite::params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Write a value into the `meta` key-value table, replacing any
+    /// existing entry for the key.
+    pub fn meta_set(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -117,6 +141,16 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         assert_eq!(db.schema_version().unwrap(), current_schema_version());
         db.integrity_check().unwrap();
+    }
+
+    #[test]
+    fn meta_get_set_round_trip_and_overwrite() {
+        let db = Database::open_in_memory().unwrap();
+        assert_eq!(db.meta_get("k").unwrap(), None);
+        db.meta_set("k", "v1").unwrap();
+        assert_eq!(db.meta_get("k").unwrap().as_deref(), Some("v1"));
+        db.meta_set("k", "v2").unwrap();
+        assert_eq!(db.meta_get("k").unwrap().as_deref(), Some("v2"));
     }
 
     #[test]
