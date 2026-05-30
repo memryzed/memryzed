@@ -5,22 +5,18 @@
 #   curl -fsSL https://memryzed.com/install.sh | bash
 #
 # This script detects your OS and CPU architecture, downloads the
-# matching release archive from GitHub, verifies its SHA-256
+# matching release archive from memryzed.com, verifies its SHA-256
 # checksum, installs the binary to ~/.memryzed/bin/memryzed, and adds
 # that directory to your shell PATH.
 #
-# Interim status: until cargo-dist generates the canonical installer,
-# this is the hand-written reference. It is the file served from
-# https://memryzed.com/install.sh. Keep it POSIX-bash compatible.
-#
 # Environment overrides:
-#   MEMRYZED_VERSION       install a specific tag instead of latest
+#   MEMRYZED_VERSION       install a specific version instead of latest
 #   MEMRYZED_INSTALL_DIR   install location (default ~/.memryzed/bin)
 #   MEMRYZED_ALLOW_ROOT    set to 1 to permit running as root
 
 set -euo pipefail
 
-REPO="memryzed/memryzed"
+BASE_URL="https://memryzed.com/releases"
 BIN_NAME="memryzed"
 INSTALL_DIR="${MEMRYZED_INSTALL_DIR:-$HOME/.memryzed/bin}"
 
@@ -31,10 +27,11 @@ if [ "$(id -u)" = "0" ] && [ "${MEMRYZED_ALLOW_ROOT:-0}" != "1" ]; then
   err "refusing to run as root; set MEMRYZED_ALLOW_ROOT=1 to override"
 fi
 
-for tool in curl uname tar shasum; do
-  command -v "$tool" >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || \
-    err "required tool not found: $tool"
+for tool in curl uname tar; do
+  command -v "$tool" >/dev/null 2>&1 || err "required tool not found: $tool"
 done
+command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 \
+  || err "need sha256sum or shasum to verify the download"
 
 os="$(uname -s)"
 arch="$(uname -m)"
@@ -42,7 +39,7 @@ arch="$(uname -m)"
 case "$os" in
   Darwin) os_part="apple-darwin" ;;
   Linux)  os_part="unknown-linux-gnu" ;;
-  *) err "unsupported OS: $os (use the manual download from GitHub Releases)" ;;
+  *) err "unsupported OS: $os" ;;
 esac
 
 case "$arch" in
@@ -53,23 +50,24 @@ esac
 
 target="${arch_part}-${os_part}"
 
+# Resolve the version. memryzed.com/releases/latest.txt holds the
+# current version string (for example "0.5.0").
 if [ -n "${MEMRYZED_VERSION:-}" ]; then
-  tag="$MEMRYZED_VERSION"
+  version="$MEMRYZED_VERSION"
 else
-  info "Resolving latest release..."
-  tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-    | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
-  [ -n "$tag" ] || err "could not determine the latest release tag"
+  info "Resolving latest version..."
+  version="$(curl -fsSL "${BASE_URL}/latest.txt" | tr -d '[:space:]')"
+  [ -n "$version" ] || err "could not determine the latest version"
 fi
 
 archive="memryzed-${target}.tar.gz"
-base="https://github.com/${REPO}/releases/download/${tag}"
+base="${BASE_URL}/v${version}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-info "Downloading ${archive} (${tag})..."
+info "Downloading ${archive} (v${version})..."
 curl -fsSL "${base}/${archive}" -o "${tmp}/${archive}" \
-  || err "download failed; check that ${tag} has an asset for ${target}"
+  || err "download failed; no asset for ${target} in v${version}"
 curl -fsSL "${base}/${archive}.sha256" -o "${tmp}/${archive}.sha256" \
   || err "checksum download failed"
 
@@ -85,11 +83,10 @@ fi
 info "Extracting..."
 tar xzf "${tmp}/${archive}" -C "$tmp"
 
-mkdir -p "$INSTALL_DIR" || err "cannot create $INSTALL_DIR (permission denied?)"
+mkdir -p "$INSTALL_DIR" || err "cannot create $INSTALL_DIR"
 cp "${tmp}/memryzed-${target}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
 chmod +x "${INSTALL_DIR}/${BIN_NAME}"
 
-# Add to PATH in the user's shell rc, if not already present.
 add_path() {
   rc="$1"
   [ -f "$rc" ] || return 0
@@ -105,7 +102,7 @@ add_path "$HOME/.zshrc"
   printf '\n# Memryzed\nfish_add_path %s\n' "$INSTALL_DIR" >> "$HOME/.config/fish/config.fish"
 
 info ""
-info "Memryzed ${tag} installed to ${INSTALL_DIR}/${BIN_NAME}"
+info "Memryzed v${version} installed to ${INSTALL_DIR}/${BIN_NAME}"
 info ""
 info "Next:"
 info "  1. Restart your shell, or run: export PATH=\"${INSTALL_DIR}:\$PATH\""
