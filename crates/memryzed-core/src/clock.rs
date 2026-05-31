@@ -47,6 +47,17 @@ pub fn format_epoch_iso(secs: i64) -> String {
         .unwrap_or_else(|| format!("epoch:{secs}"))
 }
 
+/// Parse an RFC 3339 / ISO 8601 timestamp (such as a transcript's
+/// per-message `timestamp` field) into Unix epoch seconds. Returns
+/// `None` for anything it cannot parse, so callers can fall back.
+pub fn parse_iso_to_epoch(s: &str) -> Option<i64> {
+    use time::format_description::well_known::Rfc3339;
+    use time::OffsetDateTime;
+    OffsetDateTime::parse(s.trim(), &Rfc3339)
+        .ok()
+        .map(|dt| dt.unix_timestamp())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,6 +66,14 @@ mod tests {
     fn now_returns_a_positive_recent_value() {
         let n = now_epoch_seconds();
         assert!(n > 1_700_000_000, "now must be after 2023-11-14");
+    }
+
+    #[test]
+    fn parses_rfc3339_transcript_timestamp() {
+        // The shape Copilot and Claude write.
+        let e = parse_iso_to_epoch("2025-12-26T09:28:43.695Z").unwrap();
+        assert_eq!(e, 1_766_741_323);
+        assert!(parse_iso_to_epoch("not a date").is_none());
     }
 
     #[test]

@@ -157,6 +157,9 @@ fn kiro_line(v: &Value) -> Option<Turn> {
     Some(Turn {
         role: role.to_string(),
         text,
+        // Kiro JSONL carries no usable per-message timestamp; capture
+        // falls back to the transcript file's modification time.
+        timestamp: None,
     })
 }
 
@@ -195,6 +198,10 @@ fn claude_line(v: &Value) -> Option<Turn> {
     Some(Turn {
         role: kind.to_string(),
         text: extract_text(content),
+        timestamp: v
+            .get("timestamp")
+            .and_then(|t| t.as_str())
+            .and_then(crate::clock::parse_iso_to_epoch),
     })
 }
 
@@ -220,6 +227,10 @@ fn copilot_line(v: &Value) -> Option<Turn> {
     Some(Turn {
         role: role.to_string(),
         text,
+        timestamp: v
+            .get("timestamp")
+            .and_then(|t| t.as_str())
+            .and_then(crate::clock::parse_iso_to_epoch),
     })
 }
 

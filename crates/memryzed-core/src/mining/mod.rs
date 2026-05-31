@@ -50,6 +50,11 @@ pub struct Turn {
     pub role: String,
     /// The message text.
     pub text: String,
+    /// Original conversation time in Unix epoch seconds, when the
+    /// source transcript records one per message. `None` for sources
+    /// (such as Kiro JSONL) that do not, in which case capture falls
+    /// back to the transcript file's modification time.
+    pub timestamp: Option<i64>,
 }
 
 /// Options controlling a mining run.
@@ -379,6 +384,15 @@ fn capture_episodes(
         .map(|s| s.to_string());
     let agent = source.as_str().to_string();
 
+    // Real conversation time, with a fallback chain: the turn's own
+    // timestamp (Copilot, Claude) -> the transcript file's mtime
+    // (Kiro, which has no per-message time) -> capture time.
+    let file_mtime = std::fs::metadata(file)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64);
+
     let batch: Vec<episodes::NewEpisode> = turns
         .iter()
         .filter(|t| episodes::is_substantive(&t.text))
@@ -387,6 +401,7 @@ fn capture_episodes(
             content: t.text.clone(),
             source_agent: Some(agent.clone()),
             session_ref: session_ref.clone(),
+            created_at: t.timestamp.or(file_mtime),
         })
         .collect();
 

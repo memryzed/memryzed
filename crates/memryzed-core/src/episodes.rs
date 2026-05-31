@@ -70,6 +70,9 @@ pub struct NewEpisode {
     pub source_agent: Option<String>,
     /// Originating transcript identifier.
     pub session_ref: Option<String>,
+    /// Original conversation time in Unix epoch seconds. `None` lets
+    /// the caller assign a fallback (real file time or capture time).
+    pub created_at: Option<i64>,
 }
 
 /// `true` if a turn is substantial enough to store. Trivial
@@ -118,7 +121,7 @@ pub fn insert(
             new.content,
             new.source_agent,
             new.session_ref,
-            now,
+            new.created_at.unwrap_or(now),
             model,
             dim,
             bytes,
@@ -209,7 +212,7 @@ pub fn insert_batch(
                 ep.content,
                 ep.source_agent,
                 ep.session_ref,
-                base_now + i as i64,
+                ep.created_at.unwrap_or(base_now + i as i64),
                 m,
                 dim,
                 bytes,
@@ -247,7 +250,7 @@ pub fn insert_batch_text_only(
                 ep.content,
                 ep.source_agent,
                 ep.session_ref,
-                base_now + i as i64,
+                ep.created_at.unwrap_or(base_now + i as i64),
             ],
         )?;
     }
@@ -525,6 +528,7 @@ mod tests {
                 content: "we decided to use eventbridge for the init phase".into(),
                 source_agent: Some("kiro".into()),
                 session_ref: Some("s1".into()),
+                created_at: None,
             },
             &DEmb,
             1_000,
@@ -537,6 +541,7 @@ mod tests {
                 content: "the frontend is built with tailwind".into(),
                 source_agent: Some("kiro".into()),
                 session_ref: Some("s1".into()),
+                created_at: None,
             },
             &DEmb,
             1_001,
@@ -565,6 +570,7 @@ mod tests {
                 content: "remember the postgres connection string lives in API_URL".into(),
                 source_agent: None,
                 session_ref: None,
+                created_at: None,
             },
             &NoopEmbedder,
             1_000,
