@@ -238,7 +238,12 @@ impl MemryzedServer {
 impl MemryzedServer {
     /// Find memories relevant to a query.
     #[tool(
-        description = "Find memories relevant to a query. Returns top-K hybrid-ranked memories."
+        description = "Search the user's memory of past conversations and facts across every \
+agent they use (this one and others). CALL THIS PROACTIVELY, without being asked, BEFORE answering \
+whenever the user refers to earlier work, prior decisions, 'what we discussed', past sessions, or \
+anything that may have been established before, and at the start of a task to load relevant \
+context. Returns matching facts and verbatim conversation excerpts with their source agent. When \
+in doubt, call it: it is cheap and missing relevant memory gives the user a worse answer."
     )]
     async fn recall(
         &self,
@@ -308,7 +313,12 @@ impl MemryzedServer {
     }
 
     /// Store a new memory.
-    #[tool(description = "Store a new memory. Auto-approved (user is in the loop).")]
+    #[tool(
+        description = "Store a durable fact in the user's long-term memory. CALL THIS \
+PROACTIVELY when the user states a lasting preference, decision, convention, or fact worth \
+remembering across sessions (for example 'I prefer X', 'we use Y', 'the deploy command is Z'), \
+without waiting to be asked. Auto-approved; the user stays in control via review."
+    )]
     async fn remember(
         &self,
         Parameters(args): Parameters<RememberArgs>,
@@ -611,12 +621,19 @@ impl ServerHandler for MemryzedServer {
             .with_server_info(Implementation::from_build_env())
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(
-                "Memryzed: persistent memory and session state for AI coding agents. \
-Memory tools: recall (hybrid search), remember (store), forget \
-(archive), list_memories (transparency). Session tools: checkpoint \
-(save working state), resume (restore most recent or by id), \
-list_sessions, end_session. Sessions are scoped to the project of \
-the working directory."
+                "Memryzed gives you persistent memory of the user's past conversations and \
+facts across every agent they use, including other tools. \
+\
+IMPORTANT BEHAVIOR: Call the `recall` tool proactively, on your own initiative, BEFORE answering \
+whenever a request might depend on prior context, references earlier work or decisions, mentions \
+'what we discussed' or past sessions, or whenever loading relevant background would improve your \
+answer. Also call `recall` at the start of a new task. Do not wait for the user to ask you to \
+check memory; treat recall as a normal first step, like reading a file. When the user states a \
+durable preference, decision, or fact, call `remember` to persist it. \
+\
+Tools: recall (search past conversations and facts), remember (store a fact), forget (archive), \
+list_memories (transparency). Session tools: checkpoint, resume, list_sessions, end_session, \
+scoped to the working directory's project."
                     .to_string(),
             )
     }

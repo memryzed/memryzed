@@ -109,7 +109,7 @@ pub fn insert(
     };
 
     db.conn().execute(
-        "INSERT INTO episodes
+        "INSERT OR IGNORE INTO episodes
             (id, role, content, source_agent, session_ref, project_id, created_at, model, dim, embedding)
          VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9)",
         params![
@@ -125,10 +125,32 @@ pub fn insert(
         ],
     )?;
 
-    get_by_id(db, &id)?.ok_or_else(|| Error::NotFound {
-        kind: "episode",
-        id,
-    })
+    // With OR IGNORE, a duplicate (role, content) is skipped and our
+    // generated id is never stored. Return the existing row in that
+    // case so callers still get a valid episode.
+    if let Some(ep) = get_by_id(db, &id)? {
+        Ok(ep)
+    } else {
+        get_by_role_content(db, &new.role, &new.content)?.ok_or_else(|| Error::NotFound {
+            kind: "episode",
+            id,
+        })
+    }
+}
+
+/// Look up an episode by its exact (role, content), used to resolve
+/// the existing row when an insert was skipped as a duplicate.
+fn get_by_role_content(db: &Database, role: &str, content: &str) -> Result<Option<Episode>> {
+    use rusqlite::OptionalExtension;
+    db.conn()
+        .query_row(
+            "SELECT id, role, content, source_agent, session_ref, created_at
+               FROM episodes WHERE role = ?1 AND content = ?2 LIMIT 1",
+            params![role, content],
+            row_to_episode,
+        )
+        .optional()
+        .map_err(Into::into)
 }
 
 /// Capture many episodes at once, embedding them in fixed-size
@@ -178,7 +200,7 @@ pub fn insert_batch(
             (None, None, None)
         };
         tx.execute(
-            "INSERT INTO episodes
+            "INSERT OR IGNORE INTO episodes
                 (id, role, content, source_agent, session_ref, project_id, created_at, model, dim, embedding)
              VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8, ?9)",
             params![
@@ -216,7 +238,7 @@ pub fn insert_batch_text_only(
     for (i, ep) in new.iter().enumerate() {
         let id = new_episode_id();
         tx.execute(
-            "INSERT INTO episodes
+            "INSERT OR IGNORE INTO episodes
                 (id, role, content, source_agent, session_ref, project_id, created_at, model, dim, embedding)
              VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, NULL, NULL, NULL)",
             params![
@@ -406,6 +428,12 @@ pub fn recall(
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    // Collapse duplicate content, keeping the first (highest-scored)
+    // occurrence. Capture-time dedup prevents most duplicates, but
+    // this guards any that predate the unique index and also merges
+    // turns that differ only in trailing whitespace.
+    let mut seen = std::collections::HashSet::new();
+    hits.retain(|h| seen.insert(h.episode.content.trim().to_string()));
     hits.truncate(limit);
     Ok(hits)
 }

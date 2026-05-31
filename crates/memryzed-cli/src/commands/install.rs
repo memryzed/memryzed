@@ -113,6 +113,29 @@ pub fn install(ctx: &Context, args: InstallArgs) -> Result<()> {
         if matches!(outcome, InstallOutcome::Added | InstallOutcome::Updated) {
             wrote_any = true;
         }
+
+        // Write the always-on steering rule so the agent uses
+        // Memryzed proactively even if it ignores the MCP server's
+        // instructions field. Only for present clients that support
+        // a steering mechanism.
+        if !matches!(outcome, InstallOutcome::NotPresent) {
+            match integrations::write_steering(adapter.as_ref(), &home) {
+                Ok(integrations::SteeringOutcome::Written)
+                | Ok(integrations::SteeringOutcome::Updated) => {
+                    if let Some(p) = adapter.steering_path(&home) {
+                        if !ctx.quiet {
+                            println!("      steering rule -> {}", p.display());
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    if !ctx.quiet {
+                        println!("      steering rule skipped: {e}");
+                    }
+                }
+            }
+        }
     }
 
     if !ctx.quiet {

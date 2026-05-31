@@ -36,6 +36,33 @@ pub const SERVER_NAME: &str = "memryzed";
 /// Standard suffix appended to backed-up config files.
 pub const BACKUP_SUFFIX: &str = ".memryzed.bak";
 
+/// Marker lines bracketing the Memryzed steering block in a shared
+/// rules file (such as Claude's CLAUDE.md), so it can be updated or
+/// removed without touching the user's own content.
+pub const STEERING_BEGIN: &str = "<!-- BEGIN MEMRYZED -->";
+/// Closing marker for the steering block.
+pub const STEERING_END: &str = "<!-- END MEMRYZED -->";
+
+/// The always-on instruction written into each client's rules file.
+/// This is the guaranteed fallback for agents that do not act on the
+/// MCP server's instructions field: it tells the agent, in its own
+/// rules, to use Memryzed proactively.
+pub const STEERING_BODY: &str = "\
+## Memory (Memryzed)
+
+You have persistent memory of the user's past conversations and facts,
+across this and every other agent they use, through the Memryzed MCP
+server. Use it proactively, without being asked:
+
+- Before answering anything that may depend on earlier work, prior
+  decisions, past sessions, or \"what we discussed\", call the
+  `recall` tool first and use what it returns.
+- At the start of a new task, call `recall` to load relevant context.
+- When the user states a durable preference, decision, or fact, call
+  `remember` to persist it.
+
+Treat checking memory as a normal first step, like reading a file.";
+
 /// What an adapter needs to do for a single client.
 pub trait Adapter {
     /// Lower-case identifier used by `memryzed install --client <id>`.
@@ -46,6 +73,15 @@ pub trait Adapter {
 
     /// Path to the client's MCP config file under the user's home.
     fn config_path(&self, home: &Path) -> PathBuf;
+
+    /// Path to a per-client "always-on" rules/steering file where a
+    /// one-time instruction can be written so the agent reliably uses
+    /// Memryzed even if it does not honor the MCP server's
+    /// instructions field. `None` for clients with no such mechanism.
+    fn steering_path(&self, home: &Path) -> Option<PathBuf> {
+        let _ = home;
+        None
+    }
 
     /// `true` if the client appears to be present on this machine.
     /// The default heuristic is "the parent directory of the config
@@ -91,6 +127,10 @@ impl Adapter for ClaudeCode {
     fn config_path(&self, home: &Path) -> PathBuf {
         home.join(".claude").join("mcp.json")
     }
+    fn steering_path(&self, home: &Path) -> Option<PathBuf> {
+        // Claude Code reads project/user memory from CLAUDE.md.
+        Some(home.join(".claude").join("CLAUDE.md"))
+    }
 }
 
 /// Kiro CLI.
@@ -104,6 +144,10 @@ impl Adapter for KiroCli {
     }
     fn config_path(&self, home: &Path) -> PathBuf {
         home.join(".kiro").join("settings").join("mcp.json")
+    }
+    fn steering_path(&self, home: &Path) -> Option<PathBuf> {
+        // Kiro reads always-on steering rules from ~/.kiro/steering/.
+        Some(home.join(".kiro").join("steering").join("memryzed.md"))
     }
 }
 
@@ -190,6 +234,100 @@ pub fn install_one(
         fs::write(&path, format!("{pretty}\n"))?;
     }
     Ok(outcome)
+}
+
+/// Outcome of writing a steering rule for one client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SteeringOutcome {
+    /// The client has no steering mechanism; nothing written.
+    Unsupported,
+    /// A new steering rule file (or block) was written.
+    Written,
+    /// The steering rule was already present and current.
+    AlreadyPresent,
+    /// An existing Memryzed block was refreshed.
+    Updated,
+}
+
+/// Write (or refresh) the always-on Memryzed steering rule for a
+/// client, the guaranteed fallback for agents that ignore the MCP
+/// server's instructions field.
+///
+/// For a dedicated steering file (Kiro's `steering/memryzed.md`) the
+/// file is owned entirely by Memryzed and written verbatim. For a
+/// shared rules file (Claude's `CLAUDE.md`) the Memryzed block is
+/// merged between markers, preserving any surrounding user content.
+pub fn write_steering(adapter: &dyn Adapter, home: &Path) -> Result<SteeringOutcome> {
+    let Some(path) = adapter.steering_path(home) else {
+        return Ok(SteeringOutcome::Unsupported);
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let dedicated = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.eq_ignore_ascii_case("memryzed.md"))
+        .unwrap_or(false);
+
+    if dedicated {
+        // Memryzed owns this file entirely.
+        let desired = format!("{STEERING_BODY}\n");
+        if path.is_file()
+            && fs::read_to_string(&path)
+                .map(|c| c == desired)
+                .unwrap_or(false)
+        {
+            return Ok(SteeringOutcome::AlreadyPresent);
+        }
+        let existed = path.is_file();
+        fs::write(&path, desired)?;
+        return Ok(if existed {
+            SteeringOutcome::Updated
+        } else {
+            SteeringOutcome::Written
+        });
+    }
+
+    // Shared file: merge a marked block, preserving other content.
+    let block = format!("{STEERING_BEGIN}\n{STEERING_BODY}\n{STEERING_END}\n");
+    let existing = if path.is_file() {
+        fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+
+    if let (Some(start), Some(end)) = (existing.find(STEERING_BEGIN), existing.find(STEERING_END)) {
+        let end = end + STEERING_END.len();
+        let current = &existing[start..end];
+        let want = format!("{STEERING_BEGIN}\n{STEERING_BODY}\n{STEERING_END}");
+        if current == want {
+            return Ok(SteeringOutcome::AlreadyPresent);
+        }
+        let mut updated = String::with_capacity(existing.len());
+        updated.push_str(&existing[..start]);
+        updated.push_str(&want);
+        updated.push_str(&existing[end..]);
+        backup_if_exists(&path)?;
+        fs::write(&path, updated)?;
+        return Ok(SteeringOutcome::Updated);
+    }
+
+    // No existing block: append (with a separating blank line).
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(&block);
+    if path.is_file() {
+        backup_if_exists(&path)?;
+    }
+    fs::write(&path, out)?;
+    Ok(SteeringOutcome::Written)
 }
 
 /// Outcome of a single client uninstall operation.
