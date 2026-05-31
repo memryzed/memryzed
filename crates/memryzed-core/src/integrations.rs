@@ -330,6 +330,148 @@ pub fn write_steering(adapter: &dyn Adapter, home: &Path) -> Result<SteeringOutc
     Ok(SteeringOutcome::Written)
 }
 
+/// Outcome of writing an auto-approve / tool-trust rule for one client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoApproveOutcome {
+    /// The client has no reliable per-server auto-approve mechanism,
+    /// or there was nothing to write into (e.g. no editable agent).
+    Unsupported,
+    /// A trust rule was written.
+    Written,
+    /// The trust rule was already present.
+    AlreadyPresent,
+}
+
+/// Auto-approve the Memryzed MCP tools for a client so the user is not
+/// prompted on every `recall`/`remember` call. Scoped to the Memryzed
+/// server only; it never enables blanket trust of other tools, which
+/// would be the user's decision to make, not ours.
+///
+/// Mechanisms differ per client (verified against current docs):
+/// - Claude Code: a `mcp__memryzed` rule in `permissions.allow`.
+/// - Kiro: `@memryzed` added to each existing agent's `allowedTools`
+///   (the built-in default agent cannot be edited and is left alone).
+/// - Cursor: `autoApprove` on the Memryzed server entry.
+///
+/// Codex (global-only approval) and Continue (no documented per-MCP
+/// rule) return `Unsupported`; install prints guidance instead.
+pub fn write_auto_approve(adapter: &dyn Adapter, home: &Path) -> Result<AutoApproveOutcome> {
+    match adapter.id() {
+        "claude-code" => add_to_json_string_array(
+            &home.join(".claude").join("settings.json"),
+            &["permissions", "allow"],
+            "mcp__memryzed",
+        ),
+        "kiro" => kiro_auto_approve(home),
+        "cursor" => cursor_auto_approve(home),
+        _ => Ok(AutoApproveOutcome::Unsupported),
+    }
+}
+
+/// Add `@memryzed` to the `allowedTools` of every existing Kiro agent
+/// config. Skips the example file. Returns `Unsupported` when no
+/// editable agent file exists.
+fn kiro_auto_approve(home: &Path) -> Result<AutoApproveOutcome> {
+    let dir = home.join(".kiro").join("agents");
+    if !dir.is_dir() {
+        return Ok(AutoApproveOutcome::Unsupported);
+    }
+    let mut any_agent = false;
+    let mut wrote = false;
+    for entry in fs::read_dir(&dir)? {
+        let path = entry?.path();
+        // Only *.json (so agent_config.json.example, ext "example", is skipped).
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        any_agent = true;
+        if add_to_json_string_array(&path, &["allowedTools"], "@memryzed")?
+            == AutoApproveOutcome::Written
+        {
+            wrote = true;
+        }
+    }
+    Ok(match (any_agent, wrote) {
+        (false, _) => AutoApproveOutcome::Unsupported,
+        (true, true) => AutoApproveOutcome::Written,
+        (true, false) => AutoApproveOutcome::AlreadyPresent,
+    })
+}
+
+/// Set `autoApprove: true` on the Memryzed server entry in Cursor's
+/// MCP config. Requires the server entry to already exist (install
+/// writes it first).
+fn cursor_auto_approve(home: &Path) -> Result<AutoApproveOutcome> {
+    let path = home.join(".cursor").join("mcp.json");
+    if !path.is_file() {
+        return Ok(AutoApproveOutcome::Unsupported);
+    }
+    let mut doc = read_or_default(&path)?;
+    {
+        let server = doc
+            .get_mut("mcpServers")
+            .and_then(|s| s.get_mut(SERVER_NAME))
+            .and_then(|v| v.as_object_mut());
+        let Some(server) = server else {
+            return Ok(AutoApproveOutcome::Unsupported);
+        };
+        if server.get("autoApprove") == Some(&Value::Bool(true)) {
+            return Ok(AutoApproveOutcome::AlreadyPresent);
+        }
+        server.insert("autoApprove".to_string(), Value::Bool(true));
+    }
+    backup_if_exists(&path)?;
+    let pretty = serde_json::to_string_pretty(&doc)
+        .map_err(|e| Error::Validation(format!("failed to serialize config: {e}")))?;
+    fs::write(&path, format!("{pretty}\n"))?;
+    Ok(AutoApproveOutcome::Written)
+}
+
+/// Ensure `value` appears in the string array at the nested `keys`
+/// path within the JSON document at `file`, creating the file and any
+/// intermediate objects. Preserves all other content. Returns whether
+/// a write was needed.
+fn add_to_json_string_array(file: &Path, keys: &[&str], value: &str) -> Result<AutoApproveOutcome> {
+    let mut doc = read_or_default(file)?;
+    let mut cur = &mut doc;
+    for key in &keys[..keys.len() - 1] {
+        if !cur.is_object() {
+            *cur = Value::Object(Map::new());
+        }
+        cur = cur
+            .as_object_mut()
+            .expect("just ensured object")
+            .entry((*key).to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+    }
+    if !cur.is_object() {
+        *cur = Value::Object(Map::new());
+    }
+    let last = keys[keys.len() - 1];
+    let arr = cur
+        .as_object_mut()
+        .expect("just ensured object")
+        .entry(last.to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !arr.is_array() {
+        *arr = Value::Array(Vec::new());
+    }
+    let items = arr.as_array_mut().expect("just ensured array");
+    if items.iter().any(|v| v.as_str() == Some(value)) {
+        return Ok(AutoApproveOutcome::AlreadyPresent);
+    }
+    items.push(Value::String(value.to_string()));
+
+    if let Some(parent) = file.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    backup_if_exists(file)?;
+    let pretty = serde_json::to_string_pretty(&doc)
+        .map_err(|e| Error::Validation(format!("failed to serialize config: {e}")))?;
+    fs::write(file, format!("{pretty}\n"))?;
+    Ok(AutoApproveOutcome::Written)
+}
+
 /// Outcome of a single client uninstall operation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UninstallOutcome {
@@ -480,6 +622,56 @@ mod tests {
 
     fn force_present_kiro(home: &Path) {
         std::fs::create_dir_all(home.join(".kiro").join("settings")).unwrap();
+    }
+
+    #[test]
+    fn claude_auto_approve_adds_mcp_rule_idempotently() {
+        let home = fixture_home();
+        std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+        assert_eq!(
+            write_auto_approve(&ClaudeCode, home.path()).unwrap(),
+            AutoApproveOutcome::Written
+        );
+        let v: Value = serde_json::from_str(
+            &std::fs::read_to_string(home.path().join(".claude").join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(v["permissions"]["allow"][0], "mcp__memryzed");
+        // Second run is a no-op.
+        assert_eq!(
+            write_auto_approve(&ClaudeCode, home.path()).unwrap(),
+            AutoApproveOutcome::AlreadyPresent
+        );
+    }
+
+    #[test]
+    fn kiro_auto_approve_trusts_memryzed_in_existing_agents() {
+        let home = fixture_home();
+        let agents = home.path().join(".kiro").join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(
+            agents.join("default.json"),
+            r#"{"name":"default","allowedTools":["read"]}"#,
+        )
+        .unwrap();
+        // Example file must be ignored.
+        std::fs::write(agents.join("x.json.example"), "{}").unwrap();
+
+        assert_eq!(
+            write_auto_approve(&KiroCli, home.path()).unwrap(),
+            AutoApproveOutcome::Written
+        );
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(agents.join("default.json")).unwrap())
+                .unwrap();
+        let tools: Vec<&str> = v["allowedTools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t.as_str().unwrap())
+            .collect();
+        assert!(tools.contains(&"@memryzed"));
+        assert!(tools.contains(&"read"));
     }
 
     #[test]

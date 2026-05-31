@@ -135,6 +135,29 @@ pub fn install(ctx: &Context, args: InstallArgs) -> Result<()> {
                     }
                 }
             }
+
+            // Auto-approve the Memryzed tools so the user is not
+            // prompted on every call. Scoped to memryzed only.
+            match integrations::write_auto_approve(adapter.as_ref(), &home) {
+                Ok(integrations::AutoApproveOutcome::Written) => {
+                    if !ctx.quiet {
+                        println!("      auto-approve memryzed tools -> enabled");
+                    }
+                }
+                Ok(integrations::AutoApproveOutcome::Unsupported) => {
+                    if !ctx.quiet {
+                        if let Some(hint) = auto_approve_hint(adapter.id()) {
+                            println!("      auto-approve: {hint}");
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    if !ctx.quiet {
+                        println!("      auto-approve skipped: {e}");
+                    }
+                }
+            }
         }
     }
 
@@ -149,6 +172,16 @@ pub fn install(ctx: &Context, args: InstallArgs) -> Result<()> {
         let _ = data_dir;
     }
     Ok(())
+}
+
+/// One-line manual instruction for clients whose tool trust cannot be
+/// set from a config file we own.
+fn auto_approve_hint(id: &str) -> Option<&'static str> {
+    match id {
+        "codex" => Some("Codex approves per-session; run with --full-auto or trust the repo to skip prompts"),
+        "continue" => Some("run with `cn --auto`, or choose \"don't ask again\" once to persist in ~/.continue/permissions.yaml"),
+        _ => None,
+    }
 }
 
 pub fn uninstall(ctx: &Context, args: UninstallArgs) -> Result<()> {
