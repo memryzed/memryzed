@@ -368,34 +368,94 @@ pub fn write_auto_approve(adapter: &dyn Adapter, home: &Path) -> Result<AutoAppr
     }
 }
 
-/// Add `@memryzed` to the `allowedTools` of every existing Kiro agent
-/// config. Skips the example file. Returns `Unsupported` when no
-/// editable agent file exists.
+/// Trust the Memryzed tools for Kiro.
+///
+/// 1. Adds `@memryzed` to the `allowedTools` of every existing agent
+///    config (covers users who already run a custom agent).
+/// 2. Ensures the *active default* agent is covered too. A fresh
+///    install runs the built-in `kiro_default`, which has no file and
+///    cannot be edited; but a global file named after it overrides
+///    the built-in, so writing `~/.kiro/agents/kiro_default.json`
+///    grants auto-approve out of the box without switching the user's
+///    default agent.
 fn kiro_auto_approve(home: &Path) -> Result<AutoApproveOutcome> {
     let dir = home.join(".kiro").join("agents");
-    if !dir.is_dir() {
-        return Ok(AutoApproveOutcome::Unsupported);
-    }
-    let mut any_agent = false;
+    let mut any = false;
     let mut wrote = false;
-    for entry in fs::read_dir(&dir)? {
-        let path = entry?.path();
-        // Only *.json (so agent_config.json.example, ext "example", is skipped).
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        any_agent = true;
-        if add_to_json_string_array(&path, &["allowedTools"], "@memryzed")?
-            == AutoApproveOutcome::Written
-        {
-            wrote = true;
+
+    if dir.is_dir() {
+        for entry in fs::read_dir(&dir)? {
+            let path = entry?.path();
+            // Only *.json (so agent_config.json.example, ext "example", is skipped).
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            any = true;
+            if add_to_json_string_array(&path, &["allowedTools"], "@memryzed")?
+                == AutoApproveOutcome::Written
+            {
+                wrote = true;
+            }
         }
     }
-    Ok(match (any_agent, wrote) {
+
+    // Ensure the active default agent grants @memryzed. If it has no
+    // file (the common built-in case), create an override that
+    // replicates the built-in's defaults plus the trust rule.
+    let default_agent = kiro_default_agent(home);
+    let default_path = dir.join(format!("{default_agent}.json"));
+    if !default_path.is_file() {
+        fs::create_dir_all(&dir)?;
+        fs::write(&default_path, kiro_default_override(&default_agent))?;
+        any = true;
+        wrote = true;
+    }
+
+    Ok(match (any, wrote) {
         (false, _) => AutoApproveOutcome::Unsupported,
-        (true, true) => AutoApproveOutcome::Written,
+        (_, true) => AutoApproveOutcome::Written,
         (true, false) => AutoApproveOutcome::AlreadyPresent,
     })
+}
+
+/// The active default agent name from `~/.kiro/settings/cli.json`,
+/// falling back to the built-in `kiro_default`.
+fn kiro_default_agent(home: &Path) -> String {
+    let cli = home.join(".kiro").join("settings").join("cli.json");
+    fs::read_to_string(&cli)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| {
+            v.get("chat.defaultAgent")
+                .and_then(|a| a.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| "kiro_default".to_string())
+}
+
+/// A faithful override config for a built-in default agent: all tools
+/// available, the standard global resources, legacy MCP enabled, and
+/// `@memryzed` auto-approved.
+fn kiro_default_override(name: &str) -> String {
+    let doc = serde_json::json!({
+        "name": name,
+        "description": "Default agent (Memryzed-managed): Memryzed tools auto-approved",
+        "tools": ["*"],
+        "allowedTools": ["@memryzed"],
+        "resources": [
+            "file://AGENTS.md",
+            "file://README.md",
+            "file://.kiro/steering/**/*.md",
+            "file://~/.kiro/steering/**/*.md",
+            "file://.kiro/skills/*/SKILL.md",
+            "file://~/.kiro/skills/*/SKILL.md"
+        ],
+        "useLegacyMcpJson": true
+    });
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(&doc).expect("static json")
+    )
 }
 
 /// Set `autoApprove: true` on the Memryzed server entry in Cursor's
@@ -672,6 +732,54 @@ mod tests {
             .collect();
         assert!(tools.contains(&"@memryzed"));
         assert!(tools.contains(&"read"));
+    }
+
+    #[test]
+    fn kiro_auto_approve_overrides_builtin_default_on_fresh_install() {
+        // No agent files at all (fresh install on the built-in agent).
+        let home = fixture_home();
+        std::fs::create_dir_all(home.path().join(".kiro").join("settings")).unwrap();
+
+        assert_eq!(
+            write_auto_approve(&KiroCli, home.path()).unwrap(),
+            AutoApproveOutcome::Written
+        );
+        // An override named after the built-in default must now exist
+        // and trust @memryzed, without us touching cli.json.
+        let path = home
+            .path()
+            .join(".kiro")
+            .join("agents")
+            .join("kiro_default.json");
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["name"], "kiro_default");
+        assert_eq!(v["allowedTools"][0], "@memryzed");
+        // Re-running is idempotent (file already present).
+        assert_eq!(
+            write_auto_approve(&KiroCli, home.path()).unwrap(),
+            AutoApproveOutcome::AlreadyPresent
+        );
+    }
+
+    #[test]
+    fn kiro_auto_approve_honors_configured_default_agent_name() {
+        let home = fixture_home();
+        let settings = home.path().join(".kiro").join("settings");
+        std::fs::create_dir_all(&settings).unwrap();
+        std::fs::write(
+            settings.join("cli.json"),
+            r#"{"chat.defaultAgent":"my-agent"}"#,
+        )
+        .unwrap();
+
+        write_auto_approve(&KiroCli, home.path()).unwrap();
+        // Override is written for the configured default, not kiro_default.
+        assert!(home
+            .path()
+            .join(".kiro")
+            .join("agents")
+            .join("my-agent.json")
+            .is_file());
     }
 
     #[test]
