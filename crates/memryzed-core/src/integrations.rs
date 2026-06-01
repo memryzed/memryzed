@@ -125,7 +125,15 @@ impl Adapter for ClaudeCode {
         "Claude Code"
     }
     fn config_path(&self, home: &Path) -> PathBuf {
-        home.join(".claude").join("mcp.json")
+        // Claude Code reads user-scoped MCP servers from ~/.claude.json
+        // (top-level `mcpServers`), not ~/.claude/mcp.json, which it
+        // never loads.
+        home.join(".claude.json")
+    }
+    fn is_present(&self, home: &Path) -> bool {
+        // config_path is ~/.claude.json whose parent is home (always
+        // present), so detect Claude by its data dir or config file.
+        home.join(".claude").is_dir() || home.join(".claude.json").is_file()
     }
     fn steering_path(&self, home: &Path) -> Option<PathBuf> {
         // Claude Code reads project/user memory from CLAUDE.md.

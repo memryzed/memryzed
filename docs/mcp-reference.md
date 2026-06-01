@@ -268,7 +268,7 @@ internally.
 For reference, the standard locations Memryzed reads when running
 `memryzed install`:
 
-    Claude Code:    ~/.claude/mcp.json
+    Claude Code:    ~/.claude.json
     Kiro CLI:       ~/.kiro/settings/mcp.json
     Cursor:         ~/.cursor/mcp.json
     Codex CLI:      ~/.codex/mcp.json
