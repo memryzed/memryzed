@@ -158,6 +158,26 @@ pub fn install(ctx: &Context, args: InstallArgs) -> Result<()> {
                     }
                 }
             }
+
+            // Claude Code: also wire the auto-save hooks so each turn
+            // (and pre-compaction) is captured before Claude prunes
+            // its transcripts. This is what makes Claude history
+            // durable without a separate `hooks install` command.
+            if adapter.id() == "claude-code" {
+                match install_claude_hooks(&data_dir, &binary_path, &home) {
+                    Ok(true) => {
+                        if !ctx.quiet {
+                            println!("      auto-save hooks -> enabled");
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        if !ctx.quiet {
+                            println!("      auto-save hooks skipped: {e}");
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -169,9 +189,34 @@ pub fn install(ctx: &Context, args: InstallArgs) -> Result<()> {
             println!("No changes were needed.");
         }
         println!("Verify with: memryzed doctor");
-        let _ = data_dir;
     }
     Ok(())
+}
+
+/// Wire Claude Code's auto-save hooks (periodic + pre-compaction) so
+/// each turn is captured before Claude prunes or compacts its
+/// transcripts. Returns whether settings were written. Reuses the
+/// same logic as `memryzed hooks install`.
+fn install_claude_hooks(
+    data_dir: &memryzed_core::DataDir,
+    binary_path: &std::path::Path,
+    home: &std::path::Path,
+) -> Result<bool> {
+    use memryzed_core::hooks;
+    hooks::write_scripts(data_dir.root(), binary_path)?;
+    let settings_path = hooks::claude_settings_path(home);
+    let settings = hooks::read_settings(&settings_path)?;
+    let updated = hooks::merge_into_settings(settings, data_dir.root())?;
+    if let Some(parent) = settings_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if settings_path.is_file() {
+        let backup = settings_path.with_extension("json.memryzed.bak");
+        std::fs::copy(&settings_path, &backup)?;
+    }
+    let pretty = serde_json::to_string_pretty(&updated)?;
+    std::fs::write(&settings_path, format!("{pretty}\n"))?;
+    Ok(true)
 }
 
 /// One-line manual instruction for clients whose tool trust cannot be

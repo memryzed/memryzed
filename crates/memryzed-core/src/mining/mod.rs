@@ -265,6 +265,10 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let p = entry.path();
         if p.is_dir() {
             walk(&p, out)?;
+        } else if p.file_name().and_then(|n| n.to_str()) == Some("sessions-index.json") {
+            // Claude Code metadata sidecar, not a transcript. Skip it
+            // so we do not parse it on every pass for nothing.
+            continue;
         } else if matches!(
             p.extension().and_then(|e| e.to_str()),
             Some("jsonl") | Some("json")
@@ -528,6 +532,17 @@ mod tests {
         // hashes the same and is skipped.
         assert_eq!(r.files_found, 2);
         assert_eq!(r.files_mined + r.files_skipped, 2);
+    }
+
+    #[test]
+    fn discover_skips_claude_sessions_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_kiro_transcript(tmp.path(), "real.jsonl");
+        // Claude's metadata sidecar must not be treated as a transcript.
+        std::fs::write(tmp.path().join("sessions-index.json"), r#"{"entries":[]}"#).unwrap();
+        let found = discover(tmp.path()).unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(found[0].ends_with("real.jsonl"));
     }
 
     #[test]
