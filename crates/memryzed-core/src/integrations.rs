@@ -567,6 +567,125 @@ pub fn uninstall_one(adapter: &dyn Adapter, home: &Path) -> Result<UninstallOutc
     }
 }
 
+/// Reverse [`write_steering`]: delete the dedicated steering file
+/// (Kiro) or remove the marked Memryzed block from a shared rules
+/// file (Claude `CLAUDE.md`), preserving the user's other content.
+/// Returns whether anything was removed.
+pub fn remove_steering(adapter: &dyn Adapter, home: &Path) -> Result<bool> {
+    let Some(path) = adapter.steering_path(home) else {
+        return Ok(false);
+    };
+    if !path.is_file() {
+        return Ok(false);
+    }
+    let dedicated = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.eq_ignore_ascii_case("memryzed.md"))
+        .unwrap_or(false);
+    if dedicated {
+        fs::remove_file(&path)?;
+        return Ok(true);
+    }
+    // Shared file: strip the marked block.
+    let existing = fs::read_to_string(&path)?;
+    let (Some(start), Some(end)) = (existing.find(STEERING_BEGIN), existing.find(STEERING_END))
+    else {
+        return Ok(false);
+    };
+    let end = end + STEERING_END.len();
+    let mut out = String::with_capacity(existing.len());
+    out.push_str(existing[..start].trim_end());
+    out.push_str(&existing[end..]);
+    backup_if_exists(&path)?;
+    fs::write(&path, out)?;
+    Ok(true)
+}
+
+/// Reverse [`write_auto_approve`]: remove the Memryzed trust rule from
+/// each client. For Kiro this also deletes the built-in default agent
+/// override file that install created. Returns whether anything changed.
+pub fn remove_auto_approve(adapter: &dyn Adapter, home: &Path) -> Result<bool> {
+    match adapter.id() {
+        "claude-code" => remove_from_json_string_array(
+            &home.join(".claude").join("settings.json"),
+            &["permissions", "allow"],
+            "mcp__memryzed",
+        ),
+        "kiro" => {
+            let dir = home.join(".kiro").join("agents");
+            let mut changed = false;
+            if dir.is_dir() {
+                for entry in fs::read_dir(&dir)? {
+                    let path = entry?.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                        continue;
+                    }
+                    // Delete an override file we created; otherwise just
+                    // drop @memryzed from the agent's allowedTools.
+                    if is_memryzed_override(&path) {
+                        fs::remove_file(&path)?;
+                        changed = true;
+                    } else if remove_from_json_string_array(&path, &["allowedTools"], "@memryzed")?
+                    {
+                        changed = true;
+                    }
+                }
+            }
+            Ok(changed)
+        }
+        // Cursor's autoApprove lives on the server entry, removed with
+        // the server by uninstall_one; nothing extra to do.
+        _ => Ok(false),
+    }
+}
+
+/// Whether a Kiro agent file is one Memryzed created as a built-in
+/// default override (identified by the description we wrote).
+fn is_memryzed_override(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| {
+            v.get("description")
+                .and_then(|d| d.as_str())
+                .map(|d| d.contains("Memryzed-managed"))
+        })
+        .unwrap_or(false)
+}
+
+/// Remove `value` from the string array at the nested `keys` path in
+/// the JSON file. Returns whether a write was made.
+fn remove_from_json_string_array(file: &Path, keys: &[&str], value: &str) -> Result<bool> {
+    if !file.is_file() {
+        return Ok(false);
+    }
+    let mut doc = read_or_default(file)?;
+    let mut cur = &mut doc;
+    for key in &keys[..keys.len() - 1] {
+        match cur.get_mut(*key) {
+            Some(v) => cur = v,
+            None => return Ok(false),
+        }
+    }
+    let Some(arr) = cur
+        .get_mut(keys[keys.len() - 1])
+        .and_then(|v| v.as_array_mut())
+    else {
+        return Ok(false);
+    };
+    let before = arr.len();
+    arr.retain(|v| v.as_str() != Some(value));
+    if arr.len() == before {
+        return Ok(false);
+    }
+    backup_if_exists(file)?;
+    let pretty = serde_json::to_string_pretty(&doc)
+        .map_err(|e| Error::Validation(format!("failed to serialize config: {e}")))?;
+    fs::write(file, format!("{pretty}\n"))?;
+    Ok(true)
+}
+
 /// Render the JSON entry that Memryzed registers, so the CLI can
 /// also emit it via `memryzed install --print` for users on
 /// unsupported clients.
@@ -788,6 +907,82 @@ mod tests {
             .join("agents")
             .join("my-agent.json")
             .is_file());
+    }
+
+    #[test]
+    fn remove_auto_approve_reverses_kiro_writes() {
+        let home = fixture_home();
+        let agents = home.path().join(".kiro").join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        // A user's custom agent and (implicitly) the built-in override.
+        std::fs::write(
+            agents.join("default.json"),
+            r#"{"name":"default","allowedTools":["read"]}"#,
+        )
+        .unwrap();
+
+        write_auto_approve(&KiroCli, home.path()).unwrap();
+        assert!(agents.join("kiro_default.json").is_file());
+
+        assert!(remove_auto_approve(&KiroCli, home.path()).unwrap());
+        // Override file deleted; user's agent keeps its tools minus @memryzed.
+        assert!(!agents.join("kiro_default.json").is_file());
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(agents.join("default.json")).unwrap())
+                .unwrap();
+        let tools: Vec<&str> = v["allowedTools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t.as_str().unwrap())
+            .collect();
+        assert_eq!(tools, vec!["read"]);
+    }
+
+    #[test]
+    fn remove_auto_approve_reverses_claude_permission() {
+        let home = fixture_home();
+        std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+        write_auto_approve(&ClaudeCode, home.path()).unwrap();
+        assert!(remove_auto_approve(&ClaudeCode, home.path()).unwrap());
+        let v: Value = serde_json::from_str(
+            &std::fs::read_to_string(home.path().join(".claude").join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        let allow = v["permissions"]["allow"].as_array().unwrap();
+        assert!(allow.iter().all(|x| x.as_str() != Some("mcp__memryzed")));
+    }
+
+    #[test]
+    fn remove_steering_deletes_kiro_file_and_strips_claude_block() {
+        let home = fixture_home();
+        std::fs::create_dir_all(home.path().join(".kiro").join("steering")).unwrap();
+        std::fs::create_dir_all(home.path().join(".claude")).unwrap();
+        // Claude CLAUDE.md has user content plus our block.
+        std::fs::write(home.path().join(".claude").join("CLAUDE.md"), "my notes\n").unwrap();
+
+        write_steering(&KiroCli, home.path()).unwrap();
+        write_steering(&ClaudeCode, home.path()).unwrap();
+        assert!(home
+            .path()
+            .join(".kiro")
+            .join("steering")
+            .join("memryzed.md")
+            .is_file());
+
+        assert!(remove_steering(&KiroCli, home.path()).unwrap());
+        assert!(remove_steering(&ClaudeCode, home.path()).unwrap());
+        assert!(!home
+            .path()
+            .join(".kiro")
+            .join("steering")
+            .join("memryzed.md")
+            .is_file());
+        let claude =
+            std::fs::read_to_string(home.path().join(".claude").join("CLAUDE.md")).unwrap();
+        assert!(claude.contains("my notes"));
+        assert!(!claude.contains(STEERING_BEGIN));
+        assert!(!claude.contains("Memryzed"));
     }
 
     #[test]

@@ -219,6 +219,32 @@ fn install_claude_hooks(
     Ok(true)
 }
 
+/// Reverse [`install_claude_hooks`]: remove the hook entries from
+/// Claude's settings.json and delete the generated scripts.
+fn remove_claude_hooks(data_dir: &memryzed_core::DataDir, home: &std::path::Path) -> Result<()> {
+    use memryzed_core::hooks;
+    let settings_path = hooks::claude_settings_path(home);
+    if settings_path.is_file() {
+        let mut settings = hooks::read_settings(&settings_path)?;
+        if hooks::remove_from_settings(&mut settings, data_dir.root()) {
+            let backup = settings_path.with_extension("json.memryzed.bak");
+            std::fs::copy(&settings_path, &backup).ok();
+            let pretty = serde_json::to_string_pretty(&settings)?;
+            std::fs::write(&settings_path, format!("{pretty}\n"))?;
+        }
+    }
+    // Remove the generated script files.
+    for p in [
+        hooks::periodic_script_path(data_dir.root()),
+        hooks::precompact_script_path(data_dir.root()),
+    ] {
+        if p.is_file() {
+            std::fs::remove_file(&p).ok();
+        }
+    }
+    Ok(())
+}
+
 /// One-line manual instruction for clients whose tool trust cannot be
 /// set from a config file we own.
 fn auto_approve_hint(id: &str) -> Option<&'static str> {
@@ -255,6 +281,18 @@ pub fn uninstall(ctx: &Context, args: UninstallArgs) -> Result<()> {
                     UninstallOutcome::NotPresent => "skip (not present)",
                 };
                 println!("  {} -> {}", adapter.display_name(), label);
+            }
+
+            // Reverse the rest of what install wrote: steering rule,
+            // auto-approve trust, and (Claude) the capture hooks.
+            let steered = integrations::remove_steering(adapter.as_ref(), &home).unwrap_or(false);
+            let trusted =
+                integrations::remove_auto_approve(adapter.as_ref(), &home).unwrap_or(false);
+            if adapter.id() == "claude-code" {
+                remove_claude_hooks(&data_dir, &home).ok();
+            }
+            if !ctx.quiet && (steered || trusted) {
+                println!("      removed steering/auto-approve");
             }
         }
     } else if !ctx.quiet {
