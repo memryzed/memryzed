@@ -43,6 +43,7 @@ pub fn run(ctx: &Context) -> Result<()> {
     report.section("Memory and integrations");
     report.add(check_database(ctx));
     report.add(check_embedder(ctx));
+    report.add(check_embedding_progress(ctx));
     for r in check_integrations() {
         report.add(r);
     }
@@ -252,6 +253,48 @@ fn check_embedder(ctx: &Context) -> CheckResult {
             ok("Embedding model", format!("{} (dim={dim})", e.model_id()))
         }
         Err(err) => fail("Embedding model", err.to_string()),
+    }
+}
+
+/// Report how many episodes are embedded vs pending, so a finished
+/// background indexer ("complete") is clearly distinct from a stalled
+/// or stopped one. Pending work is normal and not a failure: the
+/// background engine embeds lazily while serve runs.
+fn check_embedding_progress(ctx: &Context) -> CheckResult {
+    let dir = match ctx.data_dir() {
+        Ok(d) => d,
+        Err(err) => return fail("Embedding progress", err.to_string()),
+    };
+    let db = match memryzed_core::Database::open(&dir.db_file()) {
+        Ok(d) => d,
+        Err(err) => return fail("Embedding progress", format!("could not open db: {err}")),
+    };
+    let total = memryzed_core::episodes::count(&db).unwrap_or(0);
+    if total == 0 {
+        return ok("Embedding progress", "no episodes captured yet".to_string());
+    }
+    // Pending counts episodes not embedded under the active model. If
+    // the embedder is disabled, we cannot define "pending" against a
+    // model, so just report how many rows carry any embedding.
+    let Ok(embedder) = memryzed_core::embedder::make_default(&dir.models_dir()) else {
+        return ok(
+            "Embedding progress",
+            format!("{total} episodes captured (embedder disabled)"),
+        );
+    };
+    let pending =
+        memryzed_core::episodes::pending_embedding_count(&db, embedder.model_id()).unwrap_or(0);
+    let embedded = total - pending;
+    if pending == 0 {
+        ok(
+            "Embedding progress",
+            format!("{embedded}/{total} embedded (complete)"),
+        )
+    } else {
+        ok(
+            "Embedding progress",
+            format!("{embedded}/{total} embedded ({pending} pending; embeds in background while serving)"),
+        )
     }
 }
 
