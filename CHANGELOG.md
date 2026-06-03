@@ -12,6 +12,19 @@ For the conventions used to write entries in this file, see
 
 ### Added
 
+- Recall context expansion. A recalled conversation turn is now
+  returned together with its neighbouring turns from the same
+  conversation, so each hit reads coherently and answers that live in
+  an adjacent turn are captured. Every recall hit carries a rendered
+  excerpt with the matched line marked.
+- Chronological recall. `recall` accepts `order: "recent"` to return
+  the latest conversations by true time, answering "what did we last
+  discuss", which similarity ranking cannot.
+- Lexical rerank leg in episode recall: a model-free boost for hits
+  whose exact query terms appear, alongside the vector and full-text
+  legs. Hybrid weights are now named constants tuned in one place.
+- Self-describing recall results: the response summary names the
+  source agents and whether results are relevance- or recency-ordered.
 - Background capture-and-index engine. The MCP server (`memryzed
   serve`, which agents spawn automatically) now runs a background
   loop that captures new conversation from every detected agent and

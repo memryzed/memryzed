@@ -242,8 +242,18 @@ impl MemryzedServer {
 agent they use (this one and others). CALL THIS PROACTIVELY, without being asked, BEFORE answering \
 whenever the user refers to earlier work, prior decisions, 'what we discussed', past sessions, or \
 anything that may have been established before, and at the start of a task to load relevant \
-context. Returns matching facts and verbatim conversation excerpts with their source agent. When \
-in doubt, call it: it is cheap and missing relevant memory gives the user a worse answer."
+context. \
+\
+WRITING A GOOD QUERY: include the concrete entities you are asking about, by name, the file, \
+service, function, error, library, or decision, not just a vague topic. 'eks spot node group \
+terraform' recalls far better than 'infrastructure'. Use the user's own words and identifiers. \
+\
+To get the most recent conversations instead of the most relevant (for 'what did we last \
+discuss', 'what were we working on'), set order to 'recent'. \
+\
+Returns matching facts and verbatim conversation excerpts, each with its surrounding turns, \
+source agent, and time, so you can read the exchange in context. When in doubt, call it: it is \
+cheap and missing relevant memory gives the user a worse answer."
     )]
     async fn recall(
         &self,
@@ -260,16 +270,26 @@ in doubt, call it: it is cheap and missing relevant memory gives the user a wors
         let results = retrieval_search(&db, self.inner.embedder.as_ref(), &args.query, &opts)
             .map_err(core_to_mcp)?;
         // Also recall verbatim conversation turns (episodes) so a
-        // conversation held in one agent surfaces in another.
+        // conversation held in one agent surfaces in another. When
+        // ordered "recent", return the latest turns by time instead.
         let now = now_epoch_seconds();
         let limit = args.limit.unwrap_or(10).max(1) as usize;
-        let episodes = memryzed_core::episodes::recall(
-            &db,
-            self.inner.embedder.as_ref(),
-            &args.query,
-            limit,
-            now,
-        )
+        let recent_mode = args
+            .order
+            .as_deref()
+            .map(|o| o.eq_ignore_ascii_case("recent"))
+            .unwrap_or(false);
+        let episodes = if recent_mode {
+            memryzed_core::episodes::recent(&db, limit, now)
+        } else {
+            memryzed_core::episodes::recall(
+                &db,
+                self.inner.embedder.as_ref(),
+                &args.query,
+                limit,
+                now,
+            )
+        }
         .map_err(core_to_mcp)?;
         drop(db);
 
@@ -297,15 +317,10 @@ in doubt, call it: it is cheap and missing relevant memory gives the user a wors
                     source_agent: e.episode.source_agent.clone(),
                     score: e.score,
                     created_at: e.episode.created_at,
+                    excerpt: render_excerpt(&e.context, &e.episode),
                 })
                 .collect(),
-            summary: format!(
-                "Memryzed: {} fact{}, {} conversation excerpt{} found",
-                results.len(),
-                if results.len() == 1 { "" } else { "s" },
-                episodes.len(),
-                if episodes.len() == 1 { "" } else { "s" },
-            ),
+            summary: render_summary(results.len(), &episodes, recent_mode),
         };
         Ok(CallToolResult::success(vec![Content::text(json_string(
             &payload,
@@ -651,6 +666,10 @@ struct RecallArgs {
     /// Maximum number of results to return.
     #[serde(default)]
     limit: Option<u32>,
+    /// Ordering: "relevant" (default, by similarity) or "recent"
+    /// (latest conversations by time, for "what did we last discuss").
+    #[serde(default)]
+    order: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -767,6 +786,9 @@ struct EpisodeRecallHit {
     source_agent: Option<String>,
     score: f32,
     created_at: i64,
+    /// The matched turn rendered with its neighbouring turns from the
+    /// same conversation, in order, so the excerpt reads coherently.
+    excerpt: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -879,6 +901,62 @@ fn parse_scope_opt(s: Option<&str>) -> Result<Option<Scope>, McpError> {
 fn json_string<T: serde::Serialize>(value: &T) -> Result<String, McpError> {
     serde_json::to_string(value)
         .map_err(|e| McpError::internal_error(format!("failed to serialize response: {e}"), None))
+}
+
+/// Render a recalled hit's context window as a readable transcript
+/// excerpt: each turn on its own line prefixed by role, with the
+/// matched turn marked so a weaker agent knows which line matched.
+fn render_excerpt(
+    context: &[memryzed_core::episodes::Episode],
+    matched: &memryzed_core::episodes::Episode,
+) -> String {
+    if context.is_empty() {
+        return matched.content.clone();
+    }
+    context
+        .iter()
+        .map(|t| {
+            let marker = if t.id == matched.id { "> " } else { "  " };
+            format!("{marker}{}: {}", t.role, t.content.trim())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// One-line, self-describing summary so even a weak agent knows what
+/// it received and how to use it.
+fn render_summary(
+    facts: usize,
+    episodes: &[memryzed_core::episodes::EpisodeHit],
+    recent_mode: bool,
+) -> String {
+    let agents: std::collections::BTreeSet<&str> = episodes
+        .iter()
+        .filter_map(|e| e.episode.source_agent.as_deref())
+        .collect();
+    let from = if agents.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " from {}",
+            agents.into_iter().collect::<Vec<_>>().join(", ")
+        )
+    };
+    let mode = if recent_mode {
+        "most recent"
+    } else {
+        "most relevant"
+    };
+    format!(
+        "Memryzed: {} fact{} and {} {} conversation excerpt{}{}. Each excerpt includes the \
+surrounding turns; the matched line is marked with '>'.",
+        facts,
+        if facts == 1 { "" } else { "s" },
+        episodes.len(),
+        mode,
+        if episodes.len() == 1 { "" } else { "s" },
+        from,
+    )
 }
 
 fn core_to_mcp(err: memryzed_core::Error) -> McpError {
@@ -1002,6 +1080,7 @@ mod tests {
                 query: "  ".into(),
                 scope: None,
                 limit: None,
+                order: None,
             }))
             .await
             .unwrap_err();

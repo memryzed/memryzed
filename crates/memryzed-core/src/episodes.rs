@@ -344,11 +344,31 @@ pub fn count(db: &Database) -> Result<i64> {
 /// One ranked recall hit.
 #[derive(Debug, Clone)]
 pub struct EpisodeHit {
-    /// The episode.
+    /// The episode that matched the query.
     pub episode: Episode,
     /// Combined hybrid score.
     pub score: f32,
+    /// The matched turn together with its neighbouring turns from the
+    /// same conversation, in chronological order. A single turn is
+    /// often too small to answer a query on its own; returning the
+    /// surrounding window makes each hit usable and captures answers
+    /// that live in adjacent turns. Includes `episode` itself.
+    pub context: Vec<Episode>,
 }
+
+/// Neighbour turns to include on each side of a recall hit. The
+/// answer to a query is frequently in the turn next to the one that
+/// matched, so a small window markedly improves usable recall.
+pub const CONTEXT_RADIUS: usize = 1;
+
+// Hybrid recall scoring weights. Kept here as named constants so they
+// are tuned in one place against the benchmark. The recency weight is
+// deliberately small: it helps "what did we work on recently" but
+// hurts topical recall ("what did we decide about X").
+const W_VECTOR: f32 = 0.55;
+const W_FTS: f32 = 0.25;
+const W_LEXICAL: f32 = 0.15;
+const W_RECENCY: f32 = 0.05;
 
 /// Recall episodes relevant to a query using the same hybrid signals
 /// as memory retrieval: vector cosine over embeddings plus an FTS
@@ -416,14 +436,31 @@ pub fn recall(
         return Ok(Vec::new());
     }
 
+    // Lower-cased query terms for the lexical rerank: a hit whose text
+    // contains the exact query words is boosted. This is a model-free
+    // way to reward precise keyword overlap that the vector leg alone
+    // can miss.
+    let query_terms: Vec<String> = trimmed
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() >= 3)
+        .map(|t| t.to_lowercase())
+        .collect();
+
     // Hydrate and combine.
     let mut hits = Vec::new();
     for (id, (vec_s, fts_s)) in scores {
         if let Some(ep) = get_by_id(db, &id)? {
             let age_days = ((now - ep.created_at).max(0) as f32) / 86_400.0;
             let recency = (-age_days / 30.0).exp().clamp(0.0, 1.0);
-            let score = (0.6 * vec_s + 0.3 * fts_s + 0.1 * recency).clamp(0.0, 1.0);
-            hits.push(EpisodeHit { episode: ep, score });
+            let lexical = lexical_overlap(&ep.content, &query_terms);
+            let score =
+                (W_VECTOR * vec_s + W_FTS * fts_s + W_LEXICAL * lexical + W_RECENCY * recency)
+                    .clamp(0.0, 1.0);
+            hits.push(EpisodeHit {
+                episode: ep,
+                score,
+                context: Vec::new(),
+            });
         }
     }
     hits.sort_by(|a, b| {
@@ -438,6 +475,99 @@ pub fn recall(
     let mut seen = std::collections::HashSet::new();
     hits.retain(|h| seen.insert(h.episode.content.trim().to_string()));
     hits.truncate(limit);
+
+    // Attach the surrounding conversation window to each hit.
+    for hit in &mut hits {
+        hit.context = context_window(db, &hit.episode, CONTEXT_RADIUS)?;
+    }
+    Ok(hits)
+}
+
+/// Fraction of distinct query terms that appear in `content`. A
+/// model-free precision signal in [0,1].
+fn lexical_overlap(content: &str, query_terms: &[String]) -> f32 {
+    if query_terms.is_empty() {
+        return 0.0;
+    }
+    let lc = content.to_lowercase();
+    let mut seen = std::collections::HashSet::new();
+    let hits = query_terms
+        .iter()
+        .filter(|t| seen.insert(*t) && lc.contains(t.as_str()))
+        .count();
+    let distinct: std::collections::HashSet<&String> = query_terms.iter().collect();
+    hits as f32 / distinct.len() as f32
+}
+
+/// Return the matched episode together with up to `radius` neighbour
+/// turns on each side from the same conversation, in chronological
+/// order. Neighbours are the turns immediately adjacent in the same
+/// `session_ref`, ordered by rowid (insertion = transcript order),
+/// which is reliable even when all turns share one file-mtime
+/// timestamp. Falls back to just the episode when it has no session.
+fn context_window(db: &Database, ep: &Episode, radius: usize) -> Result<Vec<Episode>> {
+    use rusqlite::OptionalExtension;
+    let Some(session) = ep.session_ref.as_deref() else {
+        return Ok(vec![ep.clone()]);
+    };
+    // The matched turn's rowid (insertion order = transcript order).
+    let target: Option<i64> = db
+        .conn()
+        .query_row(
+            "SELECT rowid FROM episodes WHERE id = ?1",
+            params![ep.id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(target) = target else {
+        return Ok(vec![ep.clone()]);
+    };
+    let r = radius as i64;
+    let mut stmt = db.conn().prepare(
+        "SELECT id, role, content, source_agent, session_ref, created_at
+           FROM episodes
+          WHERE session_ref = ?1 AND rowid >= ?2 AND rowid <= ?3
+          ORDER BY rowid ASC",
+    )?;
+    let rows = stmt.query_map(params![session, target - r, target + r], row_to_episode)?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    if out.is_empty() {
+        out.push(ep.clone());
+    }
+    Ok(out)
+}
+
+/// Return the latest `limit` episodes by true conversation time,
+/// most recent first. Answers "what did we last discuss" / "what were
+/// we working on", which similarity-ranked recall cannot: recall
+/// ranks by relevance, not time. Each result carries its
+/// conversation window.
+pub fn recent(db: &Database, limit: usize, now: i64) -> Result<Vec<EpisodeHit>> {
+    let limit = limit.max(1);
+    let mut stmt = db.conn().prepare(
+        "SELECT id, role, content, source_agent, session_ref, created_at
+           FROM episodes ORDER BY created_at DESC, rowid DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit as i64], row_to_episode)?;
+    let mut hits = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for row in rows {
+        let ep = row?;
+        if !seen.insert(ep.content.trim().to_string()) {
+            continue;
+        }
+        let age_days = ((now - ep.created_at).max(0) as f32) / 86_400.0;
+        let score = (-age_days / 30.0).exp().clamp(0.0, 1.0);
+        let context = context_window(db, &ep, CONTEXT_RADIUS)?;
+        hits.push(EpisodeHit {
+            episode: ep,
+            score,
+            context,
+        });
+    }
     Ok(hits)
 }
 
@@ -578,5 +708,72 @@ mod tests {
         .unwrap();
         let hits = recall(&d, &NoopEmbedder, "postgres connection", 5, 2_000).unwrap();
         assert!(!hits.is_empty());
+    }
+
+    #[test]
+    fn recall_returns_neighbour_turns_as_context() {
+        let mut d = db();
+        let turns = [
+            "we are setting up the eks cluster for the dooh project",
+            "use a spot node group to keep costs down on eks",
+            "the spot group should scale from 2 to 10 nodes",
+        ];
+        let batch: Vec<NewEpisode> = turns
+            .iter()
+            .map(|t| NewEpisode {
+                role: "user".into(),
+                content: (*t).into(),
+                source_agent: Some("kiro".into()),
+                session_ref: Some("s1".into()),
+                created_at: Some(1_000),
+            })
+            .collect();
+        insert_batch_text_only(&mut d, &batch, 1_000).unwrap();
+
+        let hits = recall(&d, &NoopEmbedder, "spot node group", 3, 2_000).unwrap();
+        assert!(!hits.is_empty());
+        let top = &hits[0];
+        // The matched turn plus its neighbours are returned in order.
+        assert!(top.context.len() >= 2, "expected a context window");
+        assert!(top.context.iter().any(|e| e.id == top.episode.id));
+        // Context is contiguous within the same session.
+        assert!(top
+            .context
+            .iter()
+            .all(|e| e.session_ref.as_deref() == Some("s1")));
+    }
+
+    #[test]
+    fn recent_returns_latest_by_time() {
+        let mut d = db();
+        insert(
+            &mut d,
+            NewEpisode {
+                role: "user".into(),
+                content: "older turn about the billing pipeline design".into(),
+                source_agent: Some("kiro".into()),
+                session_ref: Some("s1".into()),
+                created_at: Some(1_000),
+            },
+            &NoopEmbedder,
+            1_000,
+        )
+        .unwrap();
+        insert(
+            &mut d,
+            NewEpisode {
+                role: "user".into(),
+                content: "newer turn about the kubernetes upgrade plan".into(),
+                source_agent: Some("kiro".into()),
+                session_ref: Some("s2".into()),
+                created_at: Some(9_000),
+            },
+            &NoopEmbedder,
+            9_000,
+        )
+        .unwrap();
+        let hits = recent(&d, 5, 10_000).unwrap();
+        assert!(!hits.is_empty());
+        assert!(hits[0].episode.content.contains("kubernetes upgrade"));
     }
 }
