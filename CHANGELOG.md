@@ -10,6 +10,17 @@ For the conventions used to write entries in this file, see
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex and Continue MCP integration wrote to the wrong files and
+  formats and so never took effect. Codex reads `~/.codex/config.toml`
+  (TOML `[mcp_servers.<name>]`), not `~/.codex/mcp.json`; Continue
+  reads `~/.continue/config.yaml` (YAML `mcpServers:` list), not
+  `~/.continue/config.json`. `install` now writes the correct file and
+  format for each, as a marked block that preserves the user's other
+  config, and `uninstall --unwire` strips it. Cursor was verified
+  correct (`~/.cursor/mcp.json`).
+
 ### Added
 
 - Secret redaction on capture. Mined conversation turns are scanned

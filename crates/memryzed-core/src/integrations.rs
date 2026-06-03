@@ -43,6 +43,14 @@ pub const STEERING_BEGIN: &str = "<!-- BEGIN MEMRYZED -->";
 /// Closing marker for the steering block.
 pub const STEERING_END: &str = "<!-- END MEMRYZED -->";
 
+/// Markers for the Memryzed block in `#`-comment formats (TOML, YAML),
+/// so the block can be updated or removed without touching the user's
+/// own content.
+const TOML_BEGIN: &str = "# BEGIN MEMRYZED";
+const TOML_END: &str = "# END MEMRYZED";
+const YAML_BEGIN: &str = "# BEGIN MEMRYZED";
+const YAML_END: &str = "# END MEMRYZED";
+
 /// The always-on instruction written into each client's rules file.
 /// This is the guaranteed fallback for agents that do not act on the
 /// MCP server's instructions field: it tells the agent, in its own
@@ -63,6 +71,18 @@ server. Use it proactively, without being asked:
 
 Treat checking memory as a normal first step, like reading a file.";
 
+/// The on-disk format of a client's MCP config file. Clients differ:
+/// most use JSON, Codex uses TOML, Continue uses YAML.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigFormat {
+    /// `mcpServers` object in a JSON document.
+    Json,
+    /// `[mcp_servers.<name>]` table in a TOML document (Codex).
+    Toml,
+    /// `mcpServers:` list of `{name, command, args}` in YAML (Continue).
+    Yaml,
+}
+
 /// What an adapter needs to do for a single client.
 pub trait Adapter {
     /// Lower-case identifier used by `memryzed install --client <id>`.
@@ -73,6 +93,11 @@ pub trait Adapter {
 
     /// Path to the client's MCP config file under the user's home.
     fn config_path(&self, home: &Path) -> PathBuf;
+
+    /// On-disk format of the client's config file. Defaults to JSON.
+    fn config_format(&self) -> ConfigFormat {
+        ConfigFormat::Json
+    }
 
     /// Path to a per-client "always-on" rules/steering file where a
     /// one-time instruction can be written so the agent reliably uses
@@ -183,7 +208,12 @@ impl Adapter for Codex {
         "Codex CLI"
     }
     fn config_path(&self, home: &Path) -> PathBuf {
-        home.join(".codex").join("mcp.json")
+        // Codex reads MCP servers from ~/.codex/config.toml under
+        // [mcp_servers.<name>], not a JSON file.
+        home.join(".codex").join("config.toml")
+    }
+    fn config_format(&self) -> ConfigFormat {
+        ConfigFormat::Toml
     }
 }
 
@@ -197,7 +227,12 @@ impl Adapter for Continue {
         "Continue"
     }
     fn config_path(&self, home: &Path) -> PathBuf {
-        home.join(".continue").join("config.json")
+        // Continue reads config from ~/.continue/config.yaml (YAML),
+        // with mcpServers as a list, not a JSON file.
+        home.join(".continue").join("config.yaml")
+    }
+    fn config_format(&self) -> ConfigFormat {
+        ConfigFormat::Yaml
     }
 }
 
@@ -228,20 +263,92 @@ pub fn install_one(
         return Ok(InstallOutcome::NotPresent);
     }
     let path = adapter.config_path(home);
-    let entry = build_entry(binary_path);
+    match adapter.config_format() {
+        ConfigFormat::Json => install_json(&path, binary_path),
+        ConfigFormat::Toml => install_toml(&path, binary_path),
+        ConfigFormat::Yaml => install_yaml(&path, binary_path),
+    }
+}
 
-    let mut existing = read_or_default(&path)?;
+/// JSON install: upsert the `mcpServers.memryzed` entry.
+fn install_json(path: &Path, binary_path: &Path) -> Result<InstallOutcome> {
+    let entry = build_entry(binary_path);
+    let mut existing = read_or_default(path)?;
     let outcome = upsert_server(&mut existing, &entry);
     if outcome != InstallOutcome::AlreadyPresent {
-        backup_if_exists(&path)?;
+        backup_if_exists(path)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         let pretty = serde_json::to_string_pretty(&existing)
             .map_err(|e| Error::Validation(format!("failed to serialize config: {e}")))?;
-        fs::write(&path, format!("{pretty}\n"))?;
+        fs::write(path, format!("{pretty}\n"))?;
     }
     Ok(outcome)
+}
+
+/// TOML install (Codex): write the `[mcp_servers.memryzed]` table as
+/// a marked block, preserving the rest of `config.toml` and never
+/// reordering the user's keys.
+fn install_toml(path: &Path, binary_path: &Path) -> Result<InstallOutcome> {
+    let cmd = binary_path.to_string_lossy();
+    // TOML string values: backslashes and quotes must be escaped.
+    let cmd_esc = cmd.replace('\\', "\\\\").replace('"', "\\\"");
+    let block = format!(
+        "{TOML_BEGIN}\n[mcp_servers.{SERVER_NAME}]\ncommand = \"{cmd_esc}\"\nargs = [\"serve\"]\n{TOML_END}\n"
+    );
+    write_marked_block(path, &block, TOML_BEGIN, TOML_END)
+}
+
+/// YAML install (Continue): ensure a `mcpServers:` list entry for
+/// Memryzed, written as a marked block so the user's YAML is never
+/// reparsed or reordered.
+fn install_yaml(path: &Path, binary_path: &Path) -> Result<InstallOutcome> {
+    let cmd = binary_path.to_string_lossy();
+    let block = format!(
+        "{YAML_BEGIN}\nmcpServers:\n  - name: memryzed\n    command: {cmd}\n    args:\n      - serve\n{YAML_END}\n"
+    );
+    write_marked_block(path, &block, YAML_BEGIN, YAML_END)
+}
+
+/// Insert or replace a `begin..end` marked block in a text config
+/// file, preserving everything outside the markers. Creates the file
+/// (and parent dir) if absent. Returns Added/Updated/AlreadyPresent.
+fn write_marked_block(path: &Path, block: &str, begin: &str, end: &str) -> Result<InstallOutcome> {
+    let existing = if path.is_file() {
+        fs::read_to_string(path)?
+    } else {
+        String::new()
+    };
+    let trimmed_block = block.trim_end();
+    if let (Some(s), Some(e)) = (existing.find(begin), existing.find(end)) {
+        let e = e + end.len();
+        if existing[s..e] == *trimmed_block {
+            return Ok(InstallOutcome::AlreadyPresent);
+        }
+        let mut updated = String::with_capacity(existing.len());
+        updated.push_str(&existing[..s]);
+        updated.push_str(trimmed_block);
+        updated.push_str(&existing[e..]);
+        backup_if_exists(path)?;
+        fs::write(path, updated)?;
+        return Ok(InstallOutcome::Updated);
+    }
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(block);
+    if path.is_file() {
+        backup_if_exists(path)?;
+    } else if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, out)?;
+    Ok(InstallOutcome::Added)
 }
 
 /// Outcome of writing a steering rule for one client.
@@ -555,6 +662,19 @@ pub fn uninstall_one(adapter: &dyn Adapter, home: &Path) -> Result<UninstallOutc
     if !path.is_file() {
         return Ok(UninstallOutcome::NotPresent);
     }
+    // TOML/YAML configs hold a marked Memryzed block; strip it,
+    // preserving the user's other content.
+    if matches!(
+        adapter.config_format(),
+        ConfigFormat::Toml | ConfigFormat::Yaml
+    ) {
+        let removed = remove_marked_block(&path, TOML_BEGIN, TOML_END)?;
+        return Ok(if removed {
+            UninstallOutcome::Removed
+        } else {
+            UninstallOutcome::NotPresent
+        });
+    }
     let mut existing = read_or_default(&path)?;
     if remove_server(&mut existing) {
         backup_if_exists(&path)?;
@@ -565,6 +685,22 @@ pub fn uninstall_one(adapter: &dyn Adapter, home: &Path) -> Result<UninstallOutc
     } else {
         Ok(UninstallOutcome::NotPresent)
     }
+}
+
+/// Remove a `begin..end` marked block from a text file, preserving
+/// surrounding content. Returns whether anything was removed.
+fn remove_marked_block(path: &Path, begin: &str, end: &str) -> Result<bool> {
+    let existing = fs::read_to_string(path)?;
+    let (Some(s), Some(e)) = (existing.find(begin), existing.find(end)) else {
+        return Ok(false);
+    };
+    let e = e + end.len();
+    let mut out = String::with_capacity(existing.len());
+    out.push_str(existing[..s].trim_end());
+    out.push_str(&existing[e..]);
+    backup_if_exists(path)?;
+    fs::write(path, out)?;
+    Ok(true)
 }
 
 /// Reverse [`write_steering`]: delete the dedicated steering file
@@ -998,6 +1134,71 @@ mod tests {
         let entry = &v["mcpServers"]["memryzed"];
         assert_eq!(entry["command"], "/opt/memryzed/bin/memryzed");
         assert_eq!(entry["args"][0], "serve");
+    }
+
+    #[test]
+    fn codex_installs_toml_block_and_uninstalls() {
+        let home = fixture_home();
+        std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+        // Pre-existing user config that must survive.
+        let cfg = Codex.config_path(home.path());
+        std::fs::write(&cfg, "model = \"gpt-5\"\n").unwrap();
+        let bin = std::path::PathBuf::from("/opt/memryzed/bin/memryzed");
+
+        assert_eq!(
+            install_one(&Codex, home.path(), &bin).unwrap(),
+            InstallOutcome::Added
+        );
+        let body = std::fs::read_to_string(&cfg).unwrap();
+        assert!(body.contains("model = \"gpt-5\""), "user content kept");
+        assert!(body.contains("[mcp_servers.memryzed]"));
+        assert!(body.contains("command = \"/opt/memryzed/bin/memryzed\""));
+        assert!(body.contains("args = [\"serve\"]"));
+        // It must parse as valid TOML.
+        body.parse::<toml::Value>().expect("valid toml");
+        // Idempotent.
+        assert_eq!(
+            install_one(&Codex, home.path(), &bin).unwrap(),
+            InstallOutcome::AlreadyPresent
+        );
+        // Uninstall strips the block, keeps user content.
+        assert_eq!(
+            uninstall_one(&Codex, home.path()).unwrap(),
+            UninstallOutcome::Removed
+        );
+        let after = std::fs::read_to_string(&cfg).unwrap();
+        assert!(after.contains("model = \"gpt-5\""));
+        assert!(!after.contains("mcp_servers"));
+    }
+
+    #[test]
+    fn continue_installs_yaml_block_and_uninstalls() {
+        let home = fixture_home();
+        std::fs::create_dir_all(home.path().join(".continue")).unwrap();
+        let cfg = Continue.config_path(home.path());
+        std::fs::write(&cfg, "name: my-assistant\n").unwrap();
+        let bin = std::path::PathBuf::from("/opt/memryzed/bin/memryzed");
+
+        assert_eq!(
+            install_one(&Continue, home.path(), &bin).unwrap(),
+            InstallOutcome::Added
+        );
+        let body = std::fs::read_to_string(&cfg).unwrap();
+        assert!(body.contains("name: my-assistant"), "user content kept");
+        assert!(body.contains("mcpServers:"));
+        assert!(body.contains("name: memryzed"));
+        assert!(body.contains("command: /opt/memryzed/bin/memryzed"));
+        assert_eq!(
+            install_one(&Continue, home.path(), &bin).unwrap(),
+            InstallOutcome::AlreadyPresent
+        );
+        assert_eq!(
+            uninstall_one(&Continue, home.path()).unwrap(),
+            UninstallOutcome::Removed
+        );
+        let after = std::fs::read_to_string(&cfg).unwrap();
+        assert!(after.contains("name: my-assistant"));
+        assert!(!after.contains("memryzed"));
     }
 
     #[test]
