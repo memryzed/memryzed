@@ -402,7 +402,11 @@ fn capture_episodes(
         .filter(|t| episodes::is_substantive(&t.text))
         .map(|t| episodes::NewEpisode {
             role: t.role.clone(),
-            content: t.text.clone(),
+            // Strip high-confidence secrets before anything is stored
+            // or embedded. Redaction is precise (see crate::redact):
+            // it only touches unmistakable credentials, leaving normal
+            // conversation text verbatim.
+            content: crate::redact::redact(&t.text).0,
             source_agent: Some(agent.clone()),
             session_ref: session_ref.clone(),
             created_at: t.timestamp.or(file_mtime),

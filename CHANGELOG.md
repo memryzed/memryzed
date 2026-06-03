@@ -12,6 +12,14 @@ For the conventions used to write entries in this file, see
 
 ### Added
 
+- Secret redaction on capture. Mined conversation turns are scanned
+  for high-confidence credentials (vendor tokens such as AWS, GitHub,
+  Slack, Stripe, OpenAI, Google and npm; PEM private-key blocks; JWTs;
+  and explicit `password`/`secret`/`api_key` assignments) and the
+  secret is replaced with a `[REDACTED:<kind>]` marker before anything
+  is stored or embedded. Redaction is deliberately precise: it never
+  redacts on entropy or length, so commit hashes, UUIDs, base64 data,
+  file paths, and ordinary `name = value` text are left verbatim.
 - Recall context expansion. A recalled conversation turn is now
   returned together with its neighbouring turns from the same
   conversation, so each hit reads coherently and answers that live in

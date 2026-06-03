@@ -37,6 +37,7 @@ pub mod memory;
 pub mod mining;
 pub mod paths;
 pub mod projects;
+pub mod redact;
 pub mod retrieval;
 pub mod sessions;
 pub mod storage;
