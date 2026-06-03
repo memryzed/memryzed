@@ -68,20 +68,90 @@ pub fn run(
         Ok(e) => e,
         Err(_) => Arc::new(NoopEmbedder),
     };
+    let (hits, n) = score_dataset(dataset, k_values, embedder.as_ref())?;
+    let recall_at_k = hits.iter().map(|&h| h as f64 / n as f64).collect();
+    Ok(BenchResult {
+        dataset: dataset.name.clone(),
+        memryzed_version: memryzed_core::VERSION.to_string(),
+        embedding_model: embedder.model_id().to_string(),
+        k_values: k_values.to_vec(),
+        recall_at_k,
+        questions: dataset.questions.len(),
+        documents: dataset.documents.len(),
+    })
+}
 
+/// Evaluate every `*.json` dataset in `dir` against its own haystack,
+/// loading the embedding model only once, and aggregate recall@K
+/// across all questions. This is the per-scene protocol used by
+/// LongMemEval-S, where each question has its own multi-session
+/// haystack.
+pub fn run_scene_dir(
+    dir: &std::path::Path,
+    k_values: &[usize],
+    models_dir: &std::path::Path,
+) -> anyhow::Result<BenchResult> {
+    let embedder: Arc<dyn Embedder> = match make_default(models_dir) {
+        Ok(e) => e,
+        Err(_) => Arc::new(NoopEmbedder),
+    };
+
+    let mut files: Vec<_> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("json"))
+        .collect();
+    files.sort();
+
+    let mut agg_hits = vec![0usize; k_values.len()];
+    let mut total_q = 0usize;
+    let mut total_docs = 0usize;
+    let n_files = files.len();
+    for (i, path) in files.iter().enumerate() {
+        let ds = Dataset::load(path)?;
+        let (hits, n) = score_dataset(&ds, k_values, embedder.as_ref())?;
+        for (a, h) in agg_hits.iter_mut().zip(hits.iter()) {
+            *a += *h;
+        }
+        total_q += n;
+        total_docs += ds.documents.len();
+        if (i + 1) % 25 == 0 {
+            eprintln!("  {}/{} scenes, {} questions", i + 1, n_files, total_q);
+        }
+    }
+
+    let recall_at_k = agg_hits
+        .iter()
+        .map(|&h| h as f64 / total_q as f64)
+        .collect();
+    Ok(BenchResult {
+        dataset: format!("{} (per-scene, {n_files} scenes)", dir.display()),
+        memryzed_version: memryzed_core::VERSION.to_string(),
+        embedding_model: embedder.model_id().to_string(),
+        k_values: k_values.to_vec(),
+        recall_at_k,
+        questions: total_q,
+        documents: total_docs,
+    })
+}
+
+/// Load one dataset into a fresh store and return (hits_at_k, n_questions).
+fn score_dataset(
+    dataset: &Dataset,
+    k_values: &[usize],
+    embedder: &dyn Embedder,
+) -> anyhow::Result<(Vec<usize>, usize)> {
     let mut db = Database::open_in_memory()?;
     let now = now_epoch_seconds();
 
-    // Load documents. The stored memory id is opaque, so we keep a map
-    // from memory content back to the dataset document id by storing
-    // the doc id as the content prefix is avoided; instead we track
-    // the mapping as we insert.
     let mut content_to_doc: HashMap<String, String> = HashMap::new();
     for doc in &dataset.documents {
+        if doc.text.trim().is_empty() {
+            continue;
+        }
         let mem = insert_with_embedder(
             &mut db,
             NewMemory::new(Scope::Global, doc.text.clone()),
-            embedder.as_ref(),
+            embedder,
             now,
         )?;
         content_to_doc.insert(mem.id, doc.id.clone());
@@ -95,33 +165,21 @@ pub fn run(
             limit: max_k,
             ..Default::default()
         };
-        let results = search(&db, embedder.as_ref(), &q.query, &opts)?;
+        let results = search(&db, embedder, &q.query, &opts)?;
         let ranked_doc_ids: Vec<&String> = results
             .iter()
             .filter_map(|r| content_to_doc.get(&r.memory.id))
             .collect();
 
         for (idx, &k) in k_values.iter().enumerate() {
-            let top_k = ranked_doc_ids.iter().take(k);
-            let hit = top_k
-                .into_iter()
+            let hit = ranked_doc_ids
+                .iter()
+                .take(k)
                 .any(|id| q.answer_doc_ids.iter().any(|a| a == *id));
             if hit {
                 hits_at_k[idx] += 1;
             }
         }
     }
-
-    let n = dataset.questions.len() as f64;
-    let recall_at_k = hits_at_k.iter().map(|&h| h as f64 / n).collect();
-
-    Ok(BenchResult {
-        dataset: dataset.name.clone(),
-        memryzed_version: memryzed_core::VERSION.to_string(),
-        embedding_model: embedder.model_id().to_string(),
-        k_values: k_values.to_vec(),
-        recall_at_k,
-        questions: dataset.questions.len(),
-        documents: dataset.documents.len(),
-    })
+    Ok((hits_at_k, dataset.questions.len()))
 }

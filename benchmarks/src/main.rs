@@ -43,7 +43,14 @@ use dataset::Dataset;
 struct Cli {
     /// Path to a normalized dataset JSON file.
     #[arg(long, value_name = "PATH")]
-    dataset: PathBuf,
+    dataset: Option<PathBuf>,
+
+    /// Directory of normalized dataset JSON files. Each is evaluated
+    /// against its own haystack with one shared model load, and recall
+    /// is aggregated across all questions. Used for per-scene
+    /// benchmarks such as LongMemEval-S.
+    #[arg(long, value_name = "PATH")]
+    scene_dir: Option<PathBuf>,
 
     /// Comma-separated K values for recall@K.
     #[arg(long, default_value = "5,10")]
@@ -70,7 +77,6 @@ fn main() -> Result<()> {
         anyhow::bail!("no valid K values parsed from --k");
     }
 
-    let dataset = Dataset::load(&cli.dataset)?;
     let models_dir = cli
         .models_dir
         .or_else(|| {
@@ -78,7 +84,11 @@ fn main() -> Result<()> {
         })
         .unwrap_or_else(|| PathBuf::from(".models"));
 
-    let result = runner::run(&dataset, &k_values, &models_dir)?;
+    let result = match (cli.scene_dir, cli.dataset) {
+        (Some(dir), _) => runner::run_scene_dir(&dir, &k_values, &models_dir)?,
+        (None, Some(path)) => runner::run(&Dataset::load(&path)?, &k_values, &models_dir)?,
+        (None, None) => anyhow::bail!("provide --dataset or --scene-dir"),
+    };
     let json = serde_json::to_string_pretty(&result)?;
 
     match cli.out {
