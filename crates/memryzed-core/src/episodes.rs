@@ -279,16 +279,22 @@ pub fn reindex_pending(db: &mut Database, embedder: &dyn Embedder, limit: usize)
     }
     let model = embedder.model_id().to_string();
 
-    // Pull a batch of un-embedded ids and their text.
-    let rows: Vec<(String, String)> = {
+    // Pull a batch of un-embedded turns with the data needed to build
+    // each one's context window.
+    let rows: Vec<(String, i64, Option<String>, String)> = {
         let mut stmt = db.conn().prepare(
-            "SELECT id, content FROM episodes
+            "SELECT id, rowid, session_ref, content FROM episodes
               WHERE embedding IS NULL OR model IS NULL OR model != ?1
               ORDER BY created_at ASC
               LIMIT ?2",
         )?;
         let mapped = stmt.query_map(params![model, limit as i64], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, String>(3)?,
+            ))
         })?;
         let mut v = Vec::new();
         for r in mapped {
@@ -300,13 +306,25 @@ pub fn reindex_pending(db: &mut Database, embedder: &dyn Embedder, limit: usize)
         return Ok(0);
     }
 
-    let texts: Vec<&str> = rows.iter().map(|(_, c)| c.as_str()).collect();
+    // Embed the *windowed* text (the turn plus its neighbours from the
+    // same conversation), not the lone turn. A single turn is often
+    // too small to match a query; embedding the surrounding passage
+    // gives the vector real context. The stored `content` stays
+    // verbatim, only the embedding is computed over the window.
+    let window_texts: Vec<String> = rows
+        .iter()
+        .map(|(_, rowid, session, content)| {
+            embed_window_text(db, session.as_deref(), *rowid, content)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let texts: Vec<&str> = window_texts.iter().map(|s| s.as_str()).collect();
     let mut embeddings = embedder.embed(&texts)?;
     embeddings.resize(rows.len(), Vec::new());
 
     let tx = db.conn_mut().transaction()?;
     let mut done = 0;
-    for ((id, _), vec) in rows.iter().zip(embeddings.iter()) {
+    for ((id, _, _, _), vec) in rows.iter().zip(embeddings.iter()) {
         if vec.is_empty() {
             continue;
         }
@@ -318,6 +336,40 @@ pub fn reindex_pending(db: &mut Database, embedder: &dyn Embedder, limit: usize)
     }
     tx.commit()?;
     Ok(done)
+}
+
+/// Build the text to embed for a turn: the turn plus up to
+/// [`CONTEXT_RADIUS`] neighbouring turns from the same conversation,
+/// joined in transcript order. Falls back to the turn's own content
+/// when it has no session. Neighbours are matched by rowid range
+/// within the same `session_ref` (insertion order = transcript order).
+fn embed_window_text(
+    db: &Database,
+    session: Option<&str>,
+    rowid: i64,
+    content: &str,
+) -> Result<String> {
+    let Some(session) = session else {
+        return Ok(content.to_string());
+    };
+    let r = CONTEXT_RADIUS as i64;
+    let mut stmt = db.conn().prepare(
+        "SELECT content FROM episodes
+          WHERE session_ref = ?1 AND rowid >= ?2 AND rowid <= ?3
+          ORDER BY rowid ASC",
+    )?;
+    let rows = stmt.query_map(params![session, rowid - r, rowid + r], |row| {
+        row.get::<_, String>(0)
+    })?;
+    let mut parts = Vec::new();
+    for row in rows {
+        parts.push(row?);
+    }
+    if parts.is_empty() {
+        Ok(content.to_string())
+    } else {
+        Ok(parts.join("\n"))
+    }
 }
 
 /// Look up an episode by id.
@@ -657,6 +709,83 @@ mod tests {
 
     fn db() -> Database {
         Database::open_in_memory().unwrap()
+    }
+
+    /// Word-bag embedder: each distinct word sets a dimension by hash.
+    /// Sensitive to *which words* are in the embedded text, so it
+    /// reveals whether windowing folded a neighbour's words in.
+    struct WordEmb;
+    impl Embedder for WordEmb {
+        fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+            Ok(texts
+                .iter()
+                .map(|t| {
+                    let mut v = vec![0.0_f32; 64];
+                    for w in t.to_lowercase().split(|c: char| !c.is_alphanumeric()) {
+                        if w.len() < 3 {
+                            continue;
+                        }
+                        let h = w
+                            .bytes()
+                            .fold(0usize, |a, b| a.wrapping_mul(31).wrapping_add(b as usize));
+                        v[h % 64] += 1.0;
+                    }
+                    let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    if norm > 0.0 {
+                        for x in &mut v {
+                            *x /= norm;
+                        }
+                    }
+                    v
+                })
+                .collect())
+        }
+        fn dimension(&self) -> Option<usize> {
+            Some(64)
+        }
+        fn model_id(&self) -> &str {
+            "test-word"
+        }
+    }
+
+    #[test]
+    fn windowed_embedding_lets_a_neighbour_keyword_find_the_turn() {
+        // Three turns. The middle turn's own text does NOT contain
+        // "kubernetes"; only its neighbour does. With windowed
+        // embedding, querying "kubernetes" should still surface the
+        // conversation via the middle turn's window.
+        let mut d = db();
+        let news: Vec<NewEpisode> = [
+            "we need to deploy the dooh bidder to the kubernetes cluster",
+            "scale it from two replicas up to ten under load",
+            "and make sure the budget pacing stays correct",
+        ]
+        .iter()
+        .map(|c| NewEpisode {
+            role: "user".into(),
+            content: (*c).into(),
+            source_agent: Some("kiro".into()),
+            session_ref: Some("s1".into()),
+            created_at: Some(1_000),
+        })
+        .collect();
+        // Text-only insert, then background-style windowed reindex.
+        insert_batch_text_only(&mut d, &news, 1_000).unwrap();
+        let n = reindex_pending(&mut d, &WordEmb, 100).unwrap();
+        assert_eq!(n, 3);
+
+        // Query a word that appears ONLY in turn 1 ("kubernetes").
+        // Turn 2 ("scale it ... replicas ...") does not contain it, so
+        // neither its FTS row nor a lone-turn embedding would match.
+        // Its WINDOW embedding includes turn 1, so it should now be
+        // retrievable. Assert the scaling turn is among the hits.
+        let hits = recall(&d, &WordEmb, "kubernetes", 5, 2_000).unwrap();
+        assert!(!hits.is_empty());
+        assert!(
+            hits.iter().any(|h| h.episode.content.contains("replicas")),
+            "windowed embedding should surface the neighbour-only turn; got: {:?}",
+            hits.iter().map(|h| &h.episode.content).collect::<Vec<_>>()
+        );
     }
 
     #[test]

@@ -12,6 +12,13 @@ For the conventions used to write entries in this file, see
 
 ### Changed
 
+- Episodes are now embedded over a context window. The background
+  indexer embeds each turn together with its neighbouring turns from
+  the same conversation, so the stored vector captures the surrounding
+  passage rather than a lone, often-too-small turn. This is the source
+  of the largest recall gap (a single turn frequently matches a query
+  worse than the conversation around it). Stored content stays
+  verbatim; only the embedding is computed over the window.
 - Episode recall now fuses its vector, full-text, and lexical legs
   with Reciprocal Rank Fusion (RRF) instead of a hand-weighted sum of
   normalized scores. RRF combines the legs' rankings, so it is
