@@ -849,6 +849,14 @@ pub fn is_configured(adapter: &dyn Adapter, home: &Path) -> bool {
         Ok(s) => s,
         Err(_) => return false,
     };
+    // TOML (Codex) and YAML (Continue) configs carry a marked block,
+    // not a JSON mcpServers object; check for the marker.
+    if matches!(
+        adapter.config_format(),
+        ConfigFormat::Toml | ConfigFormat::Yaml
+    ) {
+        return raw.contains(TOML_BEGIN);
+    }
     let doc: Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
         Err(_) => return false,
@@ -1199,6 +1207,17 @@ mod tests {
         let after = std::fs::read_to_string(&cfg).unwrap();
         assert!(after.contains("name: my-assistant"));
         assert!(!after.contains("memryzed"));
+    }
+
+    #[test]
+    fn is_configured_detects_codex_toml_block() {
+        let home = fixture_home();
+        std::fs::create_dir_all(home.path().join(".codex")).unwrap();
+        let bin = std::path::PathBuf::from("/opt/memryzed/bin/memryzed");
+        assert!(!is_configured(&Codex, home.path()));
+        install_one(&Codex, home.path(), &bin).unwrap();
+        // Must see the TOML marked block, not fail JSON-parsing it.
+        assert!(is_configured(&Codex, home.path()));
     }
 
     #[test]
