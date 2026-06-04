@@ -10,6 +10,15 @@ For the conventions used to write entries in this file, see
 
 ## [Unreleased]
 
+### Changed
+
+- Episode recall now fuses its vector, full-text, and lexical legs
+  with Reciprocal Rank Fusion (RRF) instead of a hand-weighted sum of
+  normalized scores. RRF combines the legs' rankings, so it is
+  scale-invariant and needs no per-leg weight tuning, removing four
+  hand-picked constants. Recency is no longer a relevance factor;
+  time-ordered retrieval is served by `recall(order="recent")`.
+
 ### Fixed
 
 - Codex and Continue MCP integration wrote to the wrong files and

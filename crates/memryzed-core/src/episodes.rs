@@ -361,14 +361,10 @@ pub struct EpisodeHit {
 /// matched, so a small window markedly improves usable recall.
 pub const CONTEXT_RADIUS: usize = 1;
 
-// Hybrid recall scoring weights. Kept here as named constants so they
-// are tuned in one place against the benchmark. The recency weight is
-// deliberately small: it helps "what did we work on recently" but
-// hurts topical recall ("what did we decide about X").
-const W_VECTOR: f32 = 0.55;
-const W_FTS: f32 = 0.25;
-const W_LEXICAL: f32 = 0.15;
-const W_RECENCY: f32 = 0.05;
+// Reciprocal Rank Fusion constant. Each leg contributes 1/(K + rank);
+// K dampens the influence of any single leg's top ranks. 60 is the
+// value from the original RRF paper and the de facto standard.
+const RRF_K: f32 = 60.0;
 
 /// Recall episodes relevant to a query using the same hybrid signals
 /// as memory retrieval: vector cosine over embeddings plus an FTS
@@ -384,9 +380,16 @@ pub fn recall(
     if trimmed.is_empty() {
         return Err(Error::Validation("recall query must not be empty".into()));
     }
+    // Recency is no longer a relevance factor: RRF ranks by relevance,
+    // and time-ordered retrieval is served by `recent`. The parameter
+    // is kept for API stability.
+    let _ = now;
 
     use std::collections::HashMap;
-    let mut scores: HashMap<String, (f32, f32)> = HashMap::new(); // id -> (vec, fts)
+    // Per-leg relevance scores, keyed by episode id. Each leg ranks
+    // independently; RRF below fuses the rankings, not the raw scores.
+    let mut vec_scores: HashMap<String, f32> = HashMap::new();
+    let mut fts_scores: HashMap<String, f32> = HashMap::new();
 
     // Vector leg.
     if embedder.is_active() {
@@ -405,12 +408,12 @@ pub fn recall(
             for r in rows {
                 let (id, bytes) = r?;
                 let emb = bytes_to_embedding(&bytes)?;
-                scores.entry(id).or_insert((0.0, 0.0)).0 = cosine_similarity(&q, &emb);
+                vec_scores.insert(id, cosine_similarity(&q, &emb));
             }
         }
     }
 
-    // FTS leg.
+    // FTS leg (raw bm25; only the ranking matters for RRF).
     let match_expr = sanitize_fts_query(trimmed);
     if !match_expr.is_empty() {
         let mut stmt = db.conn().prepare(
@@ -419,46 +422,70 @@ pub fn recall(
         let rows = stmt.query_map(params![match_expr], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))
         })?;
-        let raw: Vec<(String, f64)> = rows.filter_map(|r| r.ok()).collect();
-        if let Some(best) = raw.iter().map(|(_, s)| s.abs()).fold(None, max_opt) {
-            for (id, bm) in raw {
-                let norm = if best == 0.0 {
-                    0.0
-                } else {
-                    (bm.abs() / best) as f32
-                };
-                scores.entry(id).or_insert((0.0, 0.0)).1 = norm.clamp(0.0, 1.0);
-            }
+        for r in rows {
+            let (id, bm) = r?;
+            // bm25 is more-negative = better; store the magnitude so
+            // a larger value ranks higher, consistent with the others.
+            fts_scores.insert(id, bm.abs() as f32);
         }
     }
 
-    if scores.is_empty() {
+    if vec_scores.is_empty() && fts_scores.is_empty() {
         return Ok(Vec::new());
     }
 
-    // Lower-cased query terms for the lexical rerank: a hit whose text
-    // contains the exact query words is boosted. This is a model-free
-    // way to reward precise keyword overlap that the vector leg alone
-    // can miss.
+    // Candidate set: anything any leg surfaced. Hydrate once.
+    let mut candidates: std::collections::HashSet<String> = std::collections::HashSet::new();
+    candidates.extend(vec_scores.keys().cloned());
+    candidates.extend(fts_scores.keys().cloned());
+    let mut episodes: HashMap<String, Episode> = HashMap::new();
+    for id in &candidates {
+        if let Some(ep) = get_by_id(db, id)? {
+            episodes.insert(id.clone(), ep);
+        }
+    }
+
+    // Lexical leg: fraction of exact query terms present. Model-free
+    // precision signal computed over the candidates.
     let query_terms: Vec<String> = trimmed
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| t.len() >= 3)
         .map(|t| t.to_lowercase())
         .collect();
+    let mut lex_scores: HashMap<String, f32> = HashMap::new();
+    for (id, ep) in &episodes {
+        let l = lexical_overlap(&ep.content, &query_terms);
+        if l > 0.0 {
+            lex_scores.insert(id.clone(), l);
+        }
+    }
 
-    // Hydrate and combine.
+    // Reciprocal Rank Fusion: each leg contributes 1/(K + rank) for
+    // the items it ranks. Scale-invariant, no per-leg weights to tune,
+    // and robust to the legs producing scores on different scales.
+    let mut rrf: HashMap<String, f32> = HashMap::new();
+    for leg in [&vec_scores, &fts_scores, &lex_scores] {
+        let mut ranked: Vec<(&String, &f32)> = leg.iter().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+        for (rank, (id, _)) in ranked.iter().enumerate() {
+            *rrf.entry((*id).clone()).or_insert(0.0) += 1.0 / (RRF_K + rank as f32 + 1.0);
+        }
+    }
+
+    // Normalize to 0..1 by the top RRF score so the reported score is
+    // interpretable; ordering is unchanged.
+    let max_rrf = rrf
+        .values()
+        .cloned()
+        .fold(0.0_f32, f32::max)
+        .max(f32::EPSILON);
+
     let mut hits = Vec::new();
-    for (id, (vec_s, fts_s)) in scores {
-        if let Some(ep) = get_by_id(db, &id)? {
-            let age_days = ((now - ep.created_at).max(0) as f32) / 86_400.0;
-            let recency = (-age_days / 30.0).exp().clamp(0.0, 1.0);
-            let lexical = lexical_overlap(&ep.content, &query_terms);
-            let score =
-                (W_VECTOR * vec_s + W_FTS * fts_s + W_LEXICAL * lexical + W_RECENCY * recency)
-                    .clamp(0.0, 1.0);
+    for (id, raw) in rrf {
+        if let Some(ep) = episodes.get(&id).cloned() {
             hits.push(EpisodeHit {
                 episode: ep,
-                score,
+                score: (raw / max_rrf).clamp(0.0, 1.0),
                 context: Vec::new(),
             });
         }
@@ -569,13 +596,6 @@ pub fn recent(db: &Database, limit: usize, now: i64) -> Result<Vec<EpisodeHit>> 
         });
     }
     Ok(hits)
-}
-
-fn max_opt(acc: Option<f64>, x: f64) -> Option<f64> {
-    Some(match acc {
-        None => x,
-        Some(p) => p.max(x),
-    })
 }
 
 fn row_to_episode(row: &rusqlite::Row<'_>) -> rusqlite::Result<Episode> {
@@ -708,6 +728,36 @@ mod tests {
         .unwrap();
         let hits = recall(&d, &NoopEmbedder, "postgres connection", 5, 2_000).unwrap();
         assert!(!hits.is_empty());
+    }
+
+    #[test]
+    fn rrf_ranks_consensus_hit_first() {
+        // The DEmb vector leg keys on first alphabetic char, and the
+        // FTS leg keys on words. A turn that both legs favour should
+        // rank above one only a single leg favours.
+        let mut d = db();
+        let batch = [
+            ("user", "eventbridge is how we trigger the init phase"),
+            ("user", "the elephant exhibit opens at the zoo today"),
+            ("user", "tailwind handles the frontend styling"),
+        ];
+        let news: Vec<NewEpisode> = batch
+            .iter()
+            .map(|(r, c)| NewEpisode {
+                role: (*r).into(),
+                content: (*c).into(),
+                source_agent: Some("kiro".into()),
+                session_ref: Some("s1".into()),
+                created_at: Some(1_000),
+            })
+            .collect();
+        insert_batch(&mut d, &news, &DEmb, 1_000).unwrap();
+
+        // Query shares the 'e' vector dimension and the word
+        // "eventbridge" with the first turn: both legs agree.
+        let hits = recall(&d, &DEmb, "eventbridge", 5, 2_000).unwrap();
+        assert!(!hits.is_empty());
+        assert!(hits[0].episode.content.contains("eventbridge"));
     }
 
     #[test]
