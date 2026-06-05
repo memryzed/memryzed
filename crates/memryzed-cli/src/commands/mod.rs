@@ -24,6 +24,7 @@ mod install;
 mod list;
 mod log;
 mod mine;
+mod reindex;
 mod remember;
 mod review;
 mod search;
@@ -61,6 +62,8 @@ pub fn dispatch(cli: Cli) -> Result<()> {
     match command {
         Command::Init { yes } => init::run(&context, yes),
         Command::Doctor => doctor::run(&context),
+
+        Command::Reindex { all } => reindex::run(&context, reindex::Args { all }),
 
         Command::Remember {
             text,

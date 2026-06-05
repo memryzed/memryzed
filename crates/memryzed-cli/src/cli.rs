@@ -218,6 +218,19 @@ pub enum Command {
     /// Run health checks.
     Doctor,
 
+    /// Re-embed stored episodes with the current model and settings.
+    ///
+    /// Clears existing embeddings so the background indexer recomputes
+    /// them. Use after an upgrade that changes how episodes are
+    /// embedded (for example the context-window change) so existing
+    /// memory benefits, not just newly captured turns.
+    Reindex {
+        /// Re-embed every episode, even those already embedded under
+        /// the current model. This is the default for this command.
+        #[arg(long)]
+        all: bool,
+    },
+
     /// Print recent entries from the audit log.
     Log {
         /// Stream new entries as they are written.

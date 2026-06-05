@@ -10,6 +10,24 @@ For the conventions used to write entries in this file, see
 
 ## [Unreleased]
 
+### Added
+
+- Single background engine across sessions. Every agent session spawns
+  its own `memryzed serve`, and each would otherwise run its own
+  embedding engine against the shared store, multiplying CPU with the
+  number of open sessions. A single-instance lock now ensures only one
+  serve runs the engine; the rest still answer tool calls. Opening more
+  agent windows no longer increases background load.
+- Configurable indexing throughput. A new `index.profile` setting
+  (`gentle` default, `balanced`, `fast`) trades CPU for how fast a
+  conversation backlog is embedded. Set with
+  `memryzed config set index.profile fast`, override per run with
+  `MEMRYZED_INDEX_PROFILE`, and see the active profile in
+  `memryzed doctor`.
+- `memryzed reindex` re-embeds all stored episodes with the current
+  model and embedding scheme (for example after the context-window
+  change), so existing memory benefits, not only newly captured turns.
+
 ### Changed
 
 - Episodes are now embedded over a context window. The background

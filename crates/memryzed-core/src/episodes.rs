@@ -258,6 +258,18 @@ pub fn insert_batch_text_only(
     Ok(new.len())
 }
 
+/// Clear every episode's embedding so the background indexer
+/// recomputes it under the current model and embedding scheme.
+/// Returns the number of episodes marked for re-embedding. The
+/// verbatim content is untouched; only the vector is dropped.
+pub fn clear_embeddings(db: &mut Database) -> Result<usize> {
+    let n = db.conn().execute(
+        "UPDATE episodes SET embedding = NULL, model = NULL, dim = NULL",
+        [],
+    )?;
+    Ok(n)
+}
+
 /// Number of episodes still awaiting an embedding under the active
 /// model. Used by the background indexer to know if there is work.
 pub fn pending_embedding_count(db: &Database, model: &str) -> Result<i64> {
@@ -786,6 +798,35 @@ mod tests {
             "windowed embedding should surface the neighbour-only turn; got: {:?}",
             hits.iter().map(|h| &h.episode.content).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn clear_embeddings_marks_all_for_reindex() {
+        let mut d = db();
+        let news: Vec<NewEpisode> = ["first turn about pricing", "second turn about pacing"]
+            .iter()
+            .map(|c| NewEpisode {
+                role: "user".into(),
+                content: (*c).into(),
+                source_agent: Some("kiro".into()),
+                session_ref: Some("s1".into()),
+                created_at: Some(1_000),
+            })
+            .collect();
+        insert_batch(&mut d, &news, &WordEmb, 1_000).unwrap();
+        // All embedded under WordEmb -> nothing pending.
+        assert_eq!(pending_embedding_count(&d, "test-word").unwrap(), 0);
+
+        let cleared = clear_embeddings(&mut d).unwrap();
+        assert_eq!(cleared, 2);
+        // Now everything is pending again, and content is intact.
+        assert_eq!(pending_embedding_count(&d, "test-word").unwrap(), 2);
+        assert_eq!(count(&d).unwrap(), 2);
+
+        // Reindex restores embeddings.
+        let n = reindex_pending(&mut d, &WordEmb, 100).unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(pending_embedding_count(&d, "test-word").unwrap(), 0);
     }
 
     #[test]

@@ -44,6 +44,7 @@ pub fn run(ctx: &Context) -> Result<()> {
     report.add(check_database(ctx));
     report.add(check_embedder(ctx));
     report.add(check_embedding_progress(ctx));
+    report.add(check_index_profile(ctx));
     for r in check_integrations() {
         report.add(r);
     }
@@ -202,6 +203,23 @@ fn check_config_file(ctx: &Context) -> CheckResult {
             format!("missing at {}; run `memryzed init`", path.display()),
         )
     }
+}
+
+fn check_index_profile(ctx: &Context) -> CheckResult {
+    let dir = match ctx.data_dir() {
+        Ok(d) => d,
+        Err(err) => return fail("Index profile", err.to_string()),
+    };
+    let p = memryzed_core::engine::resolve_profile(&dir.config_file());
+    ok(
+        "Index profile",
+        format!(
+            "{} (batch {}, pause {}ms) - change with `memryzed config set index.profile <gentle|balanced|fast>`",
+            p.as_str(),
+            p.batch(),
+            p.pause_ms(),
+        ),
+    )
 }
 
 fn check_database(ctx: &Context) -> CheckResult {

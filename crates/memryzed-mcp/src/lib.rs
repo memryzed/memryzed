@@ -66,16 +66,39 @@ pub fn spawn_engine(data_dir: memryzed_core::DataDir, home: std::path::PathBuf) 
 }
 
 fn engine_loop(data_dir: memryzed_core::DataDir, home: std::path::PathBuf) {
+    use memryzed_core::engine::{resolve_profile, EngineLock};
     use memryzed_core::mining::{mine_all, MineOptions, Source};
     use std::time::{Duration, Instant};
 
-    // Episodes embedded per batch. Small, so each unit of work is
-    // short and interruptible.
-    const REINDEX_BATCH: usize = 16;
-    // Sleep after each embed batch. This is the throttle: with a
-    // batch of 16 and a 400 ms pause, embedding uses well under half
-    // of one core, leaving the machine responsive.
-    const EMBED_PAUSE_MS: u64 = 400;
+    // Single-instance lock: every agent session spawns its own serve,
+    // but only one may run the embedding engine, otherwise CPU
+    // multiplies with the number of open sessions. If another process
+    // holds the lock, this serve still answers tool calls but does no
+    // background work.
+    let _lock = match EngineLock::acquire(&data_dir.engine_lock()) {
+        Some(lock) => lock,
+        None => {
+            tracing::info!(
+                target: "memryzed::engine",
+                "another serve already runs the engine; skipping background work here"
+            );
+            return;
+        }
+    };
+
+    // Throughput profile (gentle by default, configurable to go
+    // faster). Resolved once at startup from env / config.
+    let profile = resolve_profile(&data_dir.config_file());
+    let reindex_batch = profile.batch();
+    let embed_pause_ms = profile.pause_ms();
+    tracing::info!(
+        target: "memryzed::engine",
+        profile = profile.as_str(),
+        batch = reindex_batch,
+        pause_ms = embed_pause_ms,
+        "background engine started"
+    );
+
     // Capture new transcript content at most this often.
     const CAPTURE_EVERY: Duration = Duration::from_secs(30);
     // Poll interval when there is nothing to embed.
@@ -119,7 +142,7 @@ fn engine_loop(data_dir: memryzed_core::DataDir, home: std::path::PathBuf) {
         //    embedded, idle longer.
         let embedded = match &embedder {
             Some(e) if e.is_active() => {
-                match memryzed_core::episodes::reindex_pending(&mut db, e.as_ref(), REINDEX_BATCH) {
+                match memryzed_core::episodes::reindex_pending(&mut db, e.as_ref(), reindex_batch) {
                     Ok(n) => n,
                     Err(err) => {
                         tracing::warn!(target: "memryzed::engine", error = %err, "reindex failed");
@@ -131,7 +154,7 @@ fn engine_loop(data_dir: memryzed_core::DataDir, home: std::path::PathBuf) {
         };
 
         if embedded > 0 {
-            std::thread::sleep(Duration::from_millis(EMBED_PAUSE_MS));
+            std::thread::sleep(Duration::from_millis(embed_pause_ms));
         } else {
             std::thread::sleep(IDLE);
         }

@@ -88,6 +88,11 @@ impl DataDir {
         self.root.join("audit.log")
     }
 
+    /// Path to the background-engine single-instance lock file.
+    pub fn engine_lock(&self) -> PathBuf {
+        self.root.join("engine.lock")
+    }
+
     /// Directory holding embedding model files.
     pub fn models_dir(&self) -> PathBuf {
         self.root.join("models")

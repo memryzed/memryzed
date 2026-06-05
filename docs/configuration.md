@@ -40,6 +40,9 @@ The default `config.toml` after `memryzed init`:
     recency_weight = 0.1
     embedding_model = "bge-small-en-v1.5"
 
+    [index]
+    profile = "gentle"            # gentle | balanced | fast
+
     [extractor]
     enabled = true
     rule_based = true
@@ -60,6 +63,29 @@ The default `config.toml` after `memryzed init`:
     audit_log = "audit.log"
 
 ## Sections in detail
+
+### `[index]`
+
+Controls how hard the background embedding engine works. Embedding is
+the only CPU-intensive part of Memryzed; the profile trades CPU for how
+quickly a backlog of conversation is embedded. Only one engine runs at
+a time even with several agent sessions open (the first `serve` process
+acquires a single-instance lock), so this is the one knob that governs
+background CPU.
+
+    profile    string. One of:
+                 gentle   (default) small batches, long pauses. Stays a
+                          fraction of one core; a large first-time
+                          backlog takes longer but you never notice it.
+                 balanced larger batches, short pauses.
+                 fast     large batches, no pause. Embeds a backlog
+                          quickly using noticeably more CPU.
+
+               Override for one run with the MEMRYZED_INDEX_PROFILE
+               environment variable. Set persistently with:
+                 memryzed config set index.profile fast
+
+               The active profile is shown by `memryzed doctor`.
 
 ### `[general]`
 
