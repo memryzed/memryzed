@@ -84,8 +84,19 @@ info "Extracting..."
 tar xzf "${tmp}/${archive}" -C "$tmp"
 
 mkdir -p "$INSTALL_DIR" || err "cannot create $INSTALL_DIR"
-cp "${tmp}/memryzed-${target}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
-chmod +x "${INSTALL_DIR}/${BIN_NAME}"
+# Install atomically: write to a temp name in the same directory, then
+# rename over the target. A plain `cp` onto a binary that a running
+# agent has open fails with "Text file busy"; renaming over it just
+# swaps the directory entry, so the upgrade succeeds without quitting
+# any running agent (the old process keeps its in-memory copy until it
+# next restarts and spawns a fresh `serve`).
+dest="${INSTALL_DIR}/${BIN_NAME}"
+new="${dest}.new.$$"
+cp "${tmp}/memryzed-${target}/${BIN_NAME}" "$new" \
+  || err "cannot write to $INSTALL_DIR"
+chmod +x "$new"
+mv -f "$new" "$dest" \
+  || { rm -f "$new"; err "cannot install to $dest"; }
 
 add_path() {
   rc="$1"
@@ -103,6 +114,9 @@ add_path "$HOME/.zshrc"
 
 info ""
 info "Memryzed v${version} installed to ${INSTALL_DIR}/${BIN_NAME}"
+info ""
+info "If an agent was already running, it keeps the previous version"
+info "until you restart it; the install itself does not interrupt it."
 info ""
 info "Next:"
 info "  1. Restart your shell, or run: export PATH=\"${INSTALL_DIR}:\$PATH\""

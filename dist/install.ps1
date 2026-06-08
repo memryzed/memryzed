@@ -62,7 +62,18 @@ try {
   Expand-Archive -Path (Join-Path $tmp $archive) -DestinationPath $tmp -Force
 
   New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-  Copy-Item (Join-Path $tmp "memryzed-$target\memryzed.exe") (Join-Path $InstallDir "memryzed.exe") -Force
+  $dest = Join-Path $InstallDir "memryzed.exe"
+  $src = Join-Path $tmp "memryzed-$target\memryzed.exe"
+  # Windows cannot overwrite an .exe that a running agent has open.
+  # Rename the old one aside first (allowed even while in use); the
+  # running process keeps using it until it restarts. Then drop the
+  # new binary in place, so the upgrade does not interrupt any agent.
+  if (Test-Path $dest) {
+    $old = "$dest.old"
+    Remove-Item $old -Force -ErrorAction SilentlyContinue
+    try { Rename-Item $dest $old -Force } catch {}
+  }
+  Copy-Item $src $dest -Force
 
   # Add to user PATH if missing.
   $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
