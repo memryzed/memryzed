@@ -262,21 +262,26 @@ impl MemryzedServer {
     /// Find memories relevant to a query.
     #[tool(
         description = "Search the user's memory of past conversations and facts across every \
-agent they use (this one and others). CALL THIS PROACTIVELY, without being asked, BEFORE answering \
-whenever the user refers to earlier work, prior decisions, 'what we discussed', past sessions, or \
-anything that may have been established before, and at the start of a task to load relevant \
-context. \
+agent they use (this one and others). \
 \
-WRITING A GOOD QUERY: include the concrete entities you are asking about, by name, the file, \
-service, function, error, library, or decision, not just a vague topic. 'eks spot node group \
-terraform' recalls far better than 'infrastructure'. Use the user's own words and identifiers. \
+CALL IT, on your own initiative, when: the user refers to earlier work, a past decision, or \
+'what we discussed'; asks to continue, resume, or finish something; mentions a project, file, \
+service, person, or convention you have no context for; or you are about to start a task in a \
+repository you may have worked in before. At the start of a non-trivial task, recall once to \
+load relevant background. \
 \
-To get the most recent conversations instead of the most relevant (for 'what did we last \
-discuss', 'what were we working on'), set order to 'recent'. \
+DO NOT call it for: self-contained questions you can already answer, trivial edits, general \
+knowledge, or anything the current files and conversation already fully cover. Calling on every \
+message is noise; aim for well-timed calls, not frequent ones. \
 \
-Returns matching facts and verbatim conversation excerpts, each with its surrounding turns, \
-source agent, and time, so you can read the exchange in context. When in doubt, call it: it is \
-cheap and missing relevant memory gives the user a worse answer."
+WRITING THE QUERY: name the concrete entities, the file, service, function, error, library, or \
+decision, in the user's own words. 'eks spot node group terraform' recalls far better than \
+'infrastructure'. For 'what did we last discuss' / 'what were we working on', set order to \
+'recent' to rank by time instead of relevance. \
+\
+Returns matching facts and verbatim conversation excerpts, each with surrounding turns, source \
+agent, and time. Weave what you find into your answer naturally ('from our earlier work, you \
+decided X'); do not dump raw results."
     )]
     async fn recall(
         &self,
@@ -352,10 +357,19 @@ cheap and missing relevant memory gives the user a worse answer."
 
     /// Store a new memory.
     #[tool(
-        description = "Store a durable fact in the user's long-term memory. CALL THIS \
-PROACTIVELY when the user states a lasting preference, decision, convention, or fact worth \
-remembering across sessions (for example 'I prefer X', 'we use Y', 'the deploy command is Z'), \
-without waiting to be asked. Auto-approved; the user stays in control via review."
+        description = "Store a durable fact in the user's long-term memory so it is recalled in \
+future sessions, across every agent they use. \
+\
+CALL IT, on your own initiative, right after: the user states a lasting preference ('I prefer \
+X', 'always do Y'); a decision is made ('we'll use Postgres', 'drop the v1 endpoint'); a \
+convention or command is established ('deploy is `make ship`', 'tests run with vitest'); or you \
+and the user work out a fact worth keeping (an architecture choice, an ownership detail, a \
+gotcha). Save the moment it is established, do not wait to be asked. \
+\
+DO NOT save: transient state, secrets or credentials, things already obvious from the repo, or \
+one-off details with no future value. One clear fact per call, in plain language. \
+\
+Auto-approved and stored locally; the user stays in control via the review queue."
     )]
     async fn remember(
         &self,
@@ -393,7 +407,8 @@ without waiting to be asked. Auto-approved; the user stays in control via review
             id: memory.id.clone(),
             status: memory.status.as_db_str().to_string(),
             summary: format!(
-                "Memryzed: stored 1 fact in {} scope",
+                "Memryzed: saved to {} memory. It will be recalled in future sessions, \
+including from your other agents.",
                 memory.scope.as_db_str()
             ),
         };
@@ -659,19 +674,24 @@ impl ServerHandler for MemryzedServer {
             .with_server_info(Implementation::from_build_env())
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_instructions(
-                "Memryzed gives you persistent memory of the user's past conversations and \
-facts across every agent they use, including other tools. \
+                "Memryzed is the user's persistent memory across every AI tool they use: past \
+conversations and durable facts, captured from this agent and others, stored locally. It lets \
+work done in one tool carry into another. Two habits make it valuable: \
 \
-IMPORTANT BEHAVIOR: Call the `recall` tool proactively, on your own initiative, BEFORE answering \
-whenever a request might depend on prior context, references earlier work or decisions, mentions \
-'what we discussed' or past sessions, or whenever loading relevant background would improve your \
-answer. Also call `recall` at the start of a new task. Do not wait for the user to ask you to \
-check memory; treat recall as a normal first step, like reading a file. When the user states a \
-durable preference, decision, or fact, call `remember` to persist it. \
+1. RECALL before you would otherwise guess or ask. When a request leans on earlier work, a past \
+decision, a project/file/convention you lack context for, or a 'continue where we left off', \
+call `recall` first and fold what it returns into your answer. At the start of a non-trivial \
+task, recall once. Skip it for self-contained questions, trivial edits, and general knowledge, \
+calling on every message is noise. \
 \
-Tools: recall (search past conversations and facts), remember (store a fact), forget (archive), \
-list_memories (transparency). Session tools: checkpoint, resume, list_sessions, end_session, \
-scoped to the working directory's project."
+2. REMEMBER the moment something durable is established, a preference, decision, convention, \
+command, or hard-won fact. Call `remember` then and there, without being asked. Do not store \
+secrets, transient state, or things obvious from the repo. \
+\
+Treat recall like reading a file and remember like writing a note: normal, unremarked steps, not \
+events to announce. Other tools: forget (archive a memory), list_memories (transparency). \
+Session tools (checkpoint, resume, list_sessions, end_session) save and restore per-project \
+working state."
                     .to_string(),
             )
     }
