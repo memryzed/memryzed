@@ -72,9 +72,9 @@ The Cargo workspace is organized into four crates:
                         interactive surfaces.
 
 The single shipped binary is `memryzed`, produced by `memryzed-cli`.
-Splitting into crates keeps boundaries clear and makes the future
-cloud server straightforward to build by reusing `memryzed-core` and
-`memryzed-mcp` behind a different transport.
+Splitting into crates keeps boundaries clear and makes an optional
+sync server straightforward to build later by reusing `memryzed-core`
+and `memryzed-mcp` behind a different transport.
 
 ## Module breakdown inside `memryzed-core`
 
@@ -287,15 +287,15 @@ swaps the binary in place, and prints the new version.
 
 ## Future-proofing notes
 
-The architecture is designed so that the future paid cloud sync can
+The architecture is designed so that optional self-hostable sync can
 be added without breaking changes:
 
 - The schema is the same locally and remotely; sync is row-level
   copying with timestamp-based conflict resolution.
 - All sensitive fields can be wrapped in a per-user encryption layer
-  added at the storage boundary; the cloud server stores ciphertext.
-- The MCP surface stays identical; cloud features are opt-in via
-  configuration (a future `[cloud]` section).
+  added at the storage boundary; the sync server stores ciphertext.
+- The MCP surface stays identical; sync features are opt-in via
+  configuration (a future `[sync]` section).
 - The crate split keeps `memryzed-core` and `memryzed-mcp` reusable
   for a server that exposes the same tools over a different
   transport.

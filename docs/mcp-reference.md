@@ -39,6 +39,9 @@ Parameters:
     query     string, required.    The natural-language query.
     scope     string, optional.    "global" | "project" | "session" | "all". Default: "all".
     limit     integer, optional.   Maximum number of results. Default: 10.
+    order     string, optional.    "relevant" (default) ranks by similarity;
+                                    "recent" returns the latest conversations
+                                    by time, for "what did we last discuss".
 
 Returns:
 
@@ -63,7 +66,8 @@ Returns:
           "content": "let's switch the deploy step to use eventbridge",
           "source_agent": "kiro",
           "score": 0.88,
-          "created_at": 1778600000
+          "created_at": 1778600000,
+          "excerpt": "  user: how should we trigger the pipeline?\n> user: let's switch the deploy step to use eventbridge\n  assistant: Good call. EventBridge gives you..."
         }
       ],
       "summary": "Memryzed: 1 fact, 1 conversation excerpt found"
@@ -75,6 +79,12 @@ captured under a different agent. The `source_agent` field tells the
 caller which agent the turn came from, which is what enables
 cross-agent continuity: a conversation held in Kiro surfaces when
 Claude Code (or any client) calls `recall`.
+
+Each episode's `excerpt` is the matched turn rendered together with
+its neighbouring turns from the same conversation, in order, with the
+matched line marked by a leading `>`. A single turn is often too small
+to answer a query on its own, so the surrounding window is included so
+the agent can read the exchange in context.
 
 The `summary` field is a one-line, user-readable description that
 clients are encouraged to render in the agent's response so users see
@@ -271,9 +281,9 @@ For reference, the standard locations Memryzed reads when running
     Claude Code:    ~/.claude.json
     Kiro CLI:       ~/.kiro/settings/mcp.json
     Cursor:         ~/.cursor/mcp.json
-    Codex CLI:      ~/.codex/mcp.json
+    Codex CLI:      ~/.codex/config.toml
     Copilot CLI:    varies, see the gh-copilot extension docs
-    Continue:       ~/.continue/config.json
+    Continue:       ~/.continue/config.yaml
 
 The exact entry written for each client is shown by:
 

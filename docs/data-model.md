@@ -285,6 +285,6 @@ between versions.
   side. It is rotated and the rotation is configurable.
 - Models are downloaded artifacts; deleting `models/` triggers a
   re-download on next start.
-- The schema is the same shape locally and in the future cloud
-  service. New tables for cloud-only features will be added in a
-  separate `cloud_*` namespace so the local database stays clean.
+- The schema is designed to stay the same shape if optional sync is
+  added later. Any sync-only tables would live in a separate
+  namespace so the local database stays clean.

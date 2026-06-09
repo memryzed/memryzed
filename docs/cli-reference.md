@@ -200,6 +200,24 @@ database integrity, embedding model availability, MCP client
 integrations, and recent activity. Prints a summary and exits with
 status zero on success or non-zero if any check fails.
 
+### `memryzed reindex`
+
+Recompute the embedding for every stored conversation turn with the
+current model and embedding scheme, then exit. The verbatim content is
+never changed; only the vectors are rebuilt.
+
+Use this after an upgrade that changes how turns are embedded (for
+example a new model, or the context-window embedding) so existing
+memory benefits, not only newly captured turns. Embedding throughput
+follows the active index profile (see `[index]` in
+`docs/configuration.md`); for a one-off bulk reindex you can speed it
+up with:
+
+    MEMRYZED_INDEX_PROFILE=fast memryzed reindex
+
+The command is resumable: if interrupted, re-running it (or the
+background engine) finishes the remaining turns.
+
 ### `memryzed log`
 
 Print recent entries from the audit log.

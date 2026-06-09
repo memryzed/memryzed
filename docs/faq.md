@@ -21,9 +21,9 @@ Other MCP-aware tools should work without changes.
 
 ## Is it free?
 
-Yes. The local server, the CLI, and all the documentation are free
-and open source under Apache-2.0. A future cloud sync product will be
-paid; the local product remains free forever.
+Yes. Memryzed is fully open source under Apache-2.0, the server, the
+CLI, and the documentation. There is no paid tier and no hosted
+product; the entire project is free and runs on your machine.
 
 ## Where is my data stored?
 
@@ -67,9 +67,10 @@ this in a future release.
 
 ## Can I share memories with my team?
 
-Not in v1. Sharing requires the cloud sync product. You can share
-through `memryzed export` and `memryzed import` if you want to
-manually move a curated set of memories between people.
+Not currently. You can share through `memryzed export` and
+`memryzed import` if you want to move a curated set of memories
+between people or machines. Optional self-hostable sync is on the
+roadmap.
 
 ## What about privacy of my conversations?
 
@@ -78,6 +79,15 @@ extractor proposes facts that go into the pending queue for your
 review. You decide what gets stored. The optional Ollama extractor
 runs locally. Telemetry, when enabled, sends only counters; no
 content.
+
+When Memryzed captures conversation turns, it scans them for
+high-confidence secrets, vendor API tokens (AWS, GitHub, Slack,
+Stripe, OpenAI, Google, npm), private-key blocks, JWTs, and explicit
+password/secret assignments, and replaces them with a
+`[REDACTED:<kind>]` marker before anything is stored or embedded.
+Redaction is deliberately conservative: it only touches text that is
+unmistakably a credential, so ordinary code, hashes, and identifiers
+are kept verbatim.
 
 ## Does Memryzed see my source code?
 
@@ -94,14 +104,9 @@ versions.
 
 ## Can I run Memryzed on a different machine and use it from this one?
 
-Not in v1. Memryzed is local-first. Cross-machine sync is the
-flagship feature of the future cloud product.
-
-## Can I host my own cloud server?
-
-Self-hosting the cloud server will be available in the future
-enterprise tier of the paid product. The local server you can run as
-much as you want, on as many machines as you want, for free.
+Not currently. Memryzed is local-first: each machine has its own
+store. You can copy the SQLite database between machines yourself if
+you want to move your memory, since everything lives in that one file.
 
 ## How do I delete a memory permanently?
 
@@ -140,9 +145,8 @@ You have several options:
 
 ## Why is there no GUI?
 
-A web UI is on the roadmap and will be part of the cloud product.
-For v1 we focused on a great CLI and TUI experience because that is
-what coding agent users live in.
+A web UI is on the roadmap. For v1 we focused on a great CLI and TUI
+experience because that is what coding agent users live in.
 
 ## What happens if I delete `~/.memryzed/`?
 

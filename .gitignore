@@ -36,3 +36,4 @@ Thumbs.db
 # Local secrets
 *.pem
 *.key
+install-commands.sh

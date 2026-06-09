@@ -69,56 +69,45 @@ Ongoing alongside the named features:
 - Code signing for macOS and Windows binaries.
 - Submission to homebrew-core and winget.
 
-## Soon: cloud sync (paid)
+## Soon: optional sync between your machines
 
-The flagship paid feature. End-to-end encrypted sync of memories and
-sessions across machines. Notable design points:
+An optional, self-hostable sync so your memories and sessions can
+follow you across your own machines. It is not required and not a
+product, Memryzed stays fully functional and fully local without it.
+Design points:
 
-- Same schema locally and in the cloud.
-- Per-user encryption keys held by the user; the server stores
-  ciphertext for any sensitive field.
+- Same schema locally and over the wire.
+- Per-user encryption keys held by the user; only ciphertext is
+  synced for sensitive fields.
 - Conflict resolution by last-write-wins on field, with a manual
   override surface.
-- A web dashboard for review and search.
 
-Pricing tier outline (subject to change):
-
-- Free: local only. Always.
-- Cloud individual: paid monthly. Sync, hosted backups, web
-  dashboard.
-- Team: paid per seat. Shared project memory, RBAC, audit export.
-- Enterprise: paid annually. Self-hosted, SSO, on-prem embeddings,
-  custom retention.
+Everything here is open source under Apache-2.0, like the rest of the
+project. There is no paid tier.
 
 ## Later: better extraction and broader reach
 
-Replace and augment the v1 extractor and broaden the product's
-reach:
+Replace and augment the v1 extractor and broaden the project's reach:
 
-- Frontier-model extraction (cloud-only, paid).
+- Stronger extraction using the local LLM extractor, and optionally a
+  user-supplied model, never a hosted/paid one.
 - Multilingual embedding models. Memryzed v1 ships English-tuned
   embeddings; expanding to multilingual support requires choosing a
   multilingual model, regenerating embeddings, and updating tests.
   Deferred deliberately: the v1 audience is primarily
   English-speaking developers, and shipping a tight English-only
   v1 is preferable to a thinner multilingual v1.
-- Per-user fine-tuning of which extraction patterns to apply.
 - Active suggestions: the extractor surfaces "did you mean to
-  remember this?" prompts in the agent UI when a fact looks
-  important but is below the threshold.
+  remember this?" prompts when a fact looks important but is below
+  the threshold.
 
-## Later: shared project memory
+## Later: shareable project memory
 
-A team-tier feature that makes `project` scope shareable. Imagine
-joining a project and inheriting 50 curated facts about its
-conventions. Built on top of cloud sync. Requires careful design of
-permissions and history.
-
-## Later: self-hosted cloud server
-
-For enterprises that cannot use SaaS. The same server that powers the
-cloud product, packaged for self-hosting on Kubernetes or a single
-VM. Same protocol, same client.
+Make `project` scope shareable so a team can check curated project
+facts into version control or a shared store and inherit them when
+joining a repository. Built on the optional sync above. Requires
+careful design of permissions and history. Open source like
+everything else.
 
 ## Later: more languages and platforms
 

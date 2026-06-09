@@ -123,11 +123,16 @@ runaway loops to consume resources.
 
 ### `[retrieval]`
 
+These weights tune the hybrid score for curated-memory search (the
+facts created with `remember`). Verbatim conversation recall
+(episodes) uses Reciprocal Rank Fusion instead, which combines the
+ranking of each leg and has no tunable weights.
+
     max_results        integer. Default number of results returned by
                        `recall` when the client does not specify a limit.
 
     vector_weight      float. Weight applied to vector similarity in the
-                       hybrid score.
+                       curated-memory hybrid score.
 
     fts_weight         float. Weight applied to BM25 full-text scores.
 
@@ -190,9 +195,9 @@ Most users should leave these at their defaults.
 
 Memryzed has no system-wide configuration in v1. Every install is
 per-user. If you want a different configuration on a different
-machine, configure each one separately. Future cloud sync will provide
-a way to share configuration across machines, but the local file
-remains the source of truth.
+machine, configure each one separately. Optional sync (on the
+roadmap) would provide a way to share configuration across machines,
+but the local file remains the source of truth.
 
 ## Environment variables
 

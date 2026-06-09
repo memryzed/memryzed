@@ -151,8 +151,8 @@ Memryzed is local first because:
 - The product is fast when there is no network on the path.
 - Backup, export, version control, and audit are all simpler when the
   data is one file you own.
-- A future cloud sync layer can be added without changing the local
-  experience.
+- An optional sync layer can be added later without changing the
+  local experience.
 
 ## Where to go from here
 
