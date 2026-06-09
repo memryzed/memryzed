@@ -33,9 +33,19 @@ use crate::error::{Error, Result};
 fn init_capped_thread_pool() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
-        let cap = std::thread::available_parallelism()
-            .map(|n| n.get().min(2))
+        // The intra-op thread count follows the active index profile so
+        // a user who opts into `fast` gets more cores for embedding,
+        // while the default `gentle` stays at 2 and invisible. The
+        // profile is read from MEMRYZED_INDEX_PROFILE (set by the CLI /
+        // engine from config); absent that, gentle.
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
             .unwrap_or(1);
+        let profile = std::env::var("MEMRYZED_INDEX_PROFILE")
+            .ok()
+            .map(|s| crate::engine::IndexProfile::parse(&s))
+            .unwrap_or(crate::engine::IndexProfile::Gentle);
+        let cap = profile.embed_threads(cores);
         let result = (|| -> ort::Result<bool> {
             let pool = ort::environment::GlobalThreadPoolOptions::default()
                 .with_intra_threads(cap)?
@@ -49,6 +59,7 @@ fn init_capped_thread_pool() {
             Ok(true) => tracing::debug!(
                 target: "memryzed::embedder",
                 intra_threads = cap,
+                profile = profile.as_str(),
                 "committed capped global ONNX thread pool",
             ),
             Ok(false) => tracing::debug!(

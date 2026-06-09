@@ -60,6 +60,20 @@ impl IndexProfile {
         }
     }
 
+    /// Maximum ONNX intra-op threads (cores) used for embedding
+    /// inference, given the machine's core count. Gentle stays at 2 so
+    /// it is invisible; faster profiles use more of the machine. The
+    /// result is always at least 1 and never exceeds `cores`.
+    pub fn embed_threads(self, cores: usize) -> usize {
+        let cores = cores.max(1);
+        let want = match self {
+            IndexProfile::Gentle => 2,
+            IndexProfile::Balanced => (cores / 2).max(2),
+            IndexProfile::Fast => 16,
+        };
+        want.min(cores).max(1)
+    }
+
     /// Parse a profile name, case-insensitive. Unknown names fall back
     /// to `Gentle`.
     pub fn parse(s: &str) -> IndexProfile {
@@ -190,6 +204,19 @@ mod tests {
         assert_eq!(IndexProfile::parse("nonsense"), IndexProfile::Gentle);
         assert!(IndexProfile::Fast.batch() > IndexProfile::Gentle.batch());
         assert!(IndexProfile::Fast.pause_ms() < IndexProfile::Gentle.pause_ms());
+    }
+
+    #[test]
+    fn embed_threads_scales_with_profile_and_cores() {
+        // Gentle stays at 2 regardless of cores.
+        assert_eq!(IndexProfile::Gentle.embed_threads(20), 2);
+        // Fast uses up to 16 on a big machine, but never exceeds cores.
+        assert_eq!(IndexProfile::Fast.embed_threads(20), 16);
+        assert_eq!(IndexProfile::Fast.embed_threads(8), 8);
+        // Balanced uses about half the cores.
+        assert_eq!(IndexProfile::Balanced.embed_threads(20), 10);
+        // Never zero.
+        assert_eq!(IndexProfile::Fast.embed_threads(1), 1);
     }
 
     #[test]

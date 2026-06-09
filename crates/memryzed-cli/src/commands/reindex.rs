@@ -46,9 +46,13 @@ pub fn run(ctx: &Context, args: Args) -> Result<()> {
     }
 
     let mut db = Database::open(&data_dir.db_file())?;
-    let embedder = make_default(&data_dir.models_dir())?;
+    // Resolve the profile and export it before loading the embedder:
+    // the ONNX thread cap is committed at embedder load and reads
+    // MEMRYZED_INDEX_PROFILE, so a `fast` reindex gets more cores.
     let profile = memryzed_core::engine::resolve_profile(&data_dir.config_file());
+    std::env::set_var("MEMRYZED_INDEX_PROFILE", profile.as_str());
     let batch = profile.batch();
+    let embedder = make_default(&data_dir.models_dir())?;
 
     if !embedder.is_active() {
         return Err(exit::Coded::new(

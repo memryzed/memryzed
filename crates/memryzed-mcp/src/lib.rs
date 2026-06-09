@@ -89,6 +89,7 @@ fn engine_loop(data_dir: memryzed_core::DataDir, home: std::path::PathBuf) {
     // Throughput profile (gentle by default, configurable to go
     // faster). Resolved once at startup from env / config.
     let profile = resolve_profile(&data_dir.config_file());
+    std::env::set_var("MEMRYZED_INDEX_PROFILE", profile.as_str());
     let reindex_batch = profile.batch();
     let embed_pause_ms = profile.pause_ms();
     tracing::info!(
