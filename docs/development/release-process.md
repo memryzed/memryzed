@@ -179,18 +179,54 @@ Used to validate a major or significant minor release in the wild.
 ## The release pipeline in CI
 
 The pipeline is defined in `.github/workflows/release.yml`. It
-triggers on tag push (`v*`) and runs `cargo-dist`. It produces:
+triggers on tag push (`v*`). For security it has **no AWS or deploy
+credentials**: it only builds and publishes a GitHub Release.
+Promoting a release to the live install endpoint is a separate manual
+step (below) performed from a trusted machine, so a compromised CI
+run can never reach production.
 
-- Statically linked binaries for every target listed in the v1
-  specification.
-- A SHA-256 checksum manifest.
-- Installer scripts (`install.sh`, `install.ps1`).
-- Updated Homebrew formula in the tap repository.
-- Updated Scoop manifest in the bucket repository.
-- A GitHub Release with all artifacts attached.
+On a tag, CI:
 
-The pipeline does not modify `main`. All changes that need to land
-on `main` are made via pull request before the tag.
+- Builds the `memryzed` binary for every supported target on its
+  native runner (Linux x86_64 and aarch64, macOS Intel and Apple
+  Silicon, Windows x86_64). Linux builds run on Ubuntu 22.04 (glibc
+  2.35) so they run on older distributions too.
+- Smoke-tests each binary (`memryzed --version`) on its own
+  architecture, so a binary that does not start, for example because
+  the embedder/ONNX stack failed to link, fails the release.
+- Packages each as `memryzed-<target>.tar.gz` (or `.zip` on Windows)
+  with a `.sha256`.
+- Generates a build-provenance attestation for each artifact, so
+  anyone can verify a download was built by this workflow from this
+  commit.
+- Attaches everything to a GitHub Release.
+
+The pipeline does not modify `main` and does not touch memryzed.com.
+
+## Promoting a release to memryzed.com
+
+The GitHub Release is the build output; the install endpoint
+(`memryzed.com/releases/`) is updated by a human from a trusted
+machine that holds the AWS credentials. CI never has them.
+
+1. Download the artifacts from the GitHub Release (or the run's
+   attestation-verified artifacts).
+2. Verify each archive against its `.sha256`.
+3. Optionally verify provenance: `gh attestation verify <file>
+   --repo memryzed/memryzed`.
+4. Sync to S3 under the version path and update `latest.txt`:
+
+       aws s3 cp <archive> s3://memryzed.com/releases/v<version>/
+       aws s3 cp <archive>.sha256 s3://memryzed.com/releases/v<version>/
+       printf '%s' "<version>" | aws s3 cp - s3://memryzed.com/releases/latest.txt
+
+5. Invalidate the CDN: `aws cloudfront create-invalidation
+   --distribution-id <id> --paths '/releases/*'`.
+6. Run the verification checklist below before announcing.
+
+Only promote to `latest.txt` after the macOS and Windows binaries
+have been run on a real machine of each kind; CI proves they build
+and start, not that every feature works on every OS.
 
 ## Verifying a release
 
