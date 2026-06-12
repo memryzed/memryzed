@@ -31,7 +31,9 @@ use std::path::{Path, PathBuf};
 pub const ENV_DATA_DIR: &str = "MEMRYZED_DATA_DIR";
 
 /// The root directory name appended under the user's home when no
-/// override is supplied.
+/// override is supplied. Unix only; on Windows the data directory
+/// lives under `%LOCALAPPDATA%\memryzed`.
+#[cfg(unix)]
 const DEFAULT_DIR_NAME: &str = ".memryzed";
 
 /// Wrapper around the resolved data-directory root with helpers for
