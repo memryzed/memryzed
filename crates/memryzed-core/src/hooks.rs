@@ -144,16 +144,29 @@ pub fn remove_from_settings(settings: &mut Value, data_dir: &Path) -> bool {
         HookEvent::PreCompact.settings_key(),
     ] {
         if let Some(val) = hooks.get(key) {
-            if serde_json::to_string(val)
-                .map(|s| our_scripts.iter().any(|p| s.contains(p.as_str())))
-                .unwrap_or(false)
-            {
+            if entry_references_our_script(val, &our_scripts) {
                 hooks.remove(key);
                 removed = true;
             }
         }
     }
     removed
+}
+
+/// Whether a Claude `hooks[event]` value contains a command that
+/// invokes one of our generated scripts.
+///
+/// Compares the `command` field directly rather than substring-matching
+/// serialized JSON, which would break on Windows where path separators
+/// are escaped (`\` becomes `\\`) during serialization.
+fn entry_references_our_script(val: &Value, our_scripts: &[String]) -> bool {
+    val.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.get("hooks").and_then(|h| h.as_array()))
+        .flatten()
+        .filter_map(|h| h.get("command").and_then(|c| c.as_str()))
+        .any(|cmd| our_scripts.iter().any(|p| p == cmd))
 }
 
 fn periodic_script(bin: &str) -> String {
@@ -307,6 +320,18 @@ mod tests {
     fn remove_returns_false_when_nothing_present() {
         let mut settings = json!({"model": "sonnet"});
         assert!(!remove_from_settings(&mut settings, &data_dir()));
+    }
+
+    #[test]
+    fn remove_matches_windows_style_paths() {
+        // Regression: removal used to substring-match serialized JSON,
+        // which escapes backslashes and never matched on Windows.
+        let win = PathBuf::from(r"C:\Users\x\AppData\Local\memryzed");
+        let mut settings = merge_into_settings(json!({}), &win).unwrap();
+        assert!(settings["hooks"].get("Stop").is_some());
+        assert!(remove_from_settings(&mut settings, &win));
+        assert!(settings["hooks"].get("Stop").is_none());
+        assert!(settings["hooks"].get("PreCompact").is_none());
     }
 
     #[test]
