@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.78"
 license = "Apache-2.0"
@@ -22,9 +22,9 @@ categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
 # Internal
-memryzed-core = { path = "crates/memryzed-core", version = "0.6.0" }
-memryzed-mcp = { path = "crates/memryzed-mcp", version = "0.6.0" }
-memryzed-tui = { path = "crates/memryzed-tui", version = "0.6.0" }
+memryzed-core = { path = "crates/memryzed-core", version = "0.7.0" }
+memryzed-mcp = { path = "crates/memryzed-mcp", version = "0.7.0" }
+memryzed-tui = { path = "crates/memryzed-tui", version = "0.7.0" }
 
 # External
 anyhow = "1.0"
