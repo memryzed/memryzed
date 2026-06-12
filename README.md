@@ -66,9 +66,10 @@ no telemetry by default, no network calls.
 ## How it works
 
 Memryzed runs as a local MCP server that your agent talks to over stdio.
-Agents call eight tools to recall facts, store facts, checkpoint sessions,
-and resume them. A background extractor proposes facts from your
-conversations; you approve, edit, or reject them through a CLI review queue.
+Agents call nine tools to recall facts and conversations, store facts,
+checkpoint sessions, and resume them. A background engine captures your
+agent conversations and proposes facts; you approve, edit, or reject the
+proposed facts through a CLI review queue.
 
 For the full architecture, see `docs/architecture.md`.
 

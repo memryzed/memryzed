@@ -26,7 +26,7 @@ The server reports the following metadata at handshake:
 
 ## Tools
 
-Memryzed exposes eight tools. The set is intentionally small. Clients
+Memryzed exposes nine tools. The set is intentionally small. Clients
 should not assume additional tools will be added without a major
 version bump.
 
@@ -234,6 +234,37 @@ Returns:
       "session_id": "sess_t7u8v9",
       "status": "completed",
       "summary": "Memryzed: session ended"
+    }
+
+### `extract_from`
+
+Scan a single user message for durable facts and preferences.
+High-confidence candidates are stored automatically; the rest are
+queued for review. This lets a client feed user messages to Memryzed
+without deciding itself what is worth remembering.
+
+Parameters:
+
+    message                  string, required.  The user message to scan.
+    auto_approve_threshold   number, optional.  Confidence at or above which
+                                                a candidate is stored. Default 0.85.
+    client                   string, optional.  Originating client id, recorded
+                                                on stored memories.
+    use_ollama               boolean, optional. Also consult a local Ollama
+                                                instance. Off by default.
+
+Returns:
+
+    {
+      "candidates": [
+        {
+          "id": "mem_x1y2z3",
+          "content": "User prefers pnpm over npm",
+          "status": "approved",
+          "confidence": 0.92
+        }
+      ],
+      "summary": "Memryzed: 1 stored, 0 queued for review"
     }
 
 ## Errors

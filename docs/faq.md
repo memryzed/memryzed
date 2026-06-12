@@ -48,10 +48,12 @@ roadmap.
 
 ## Does it work in containers and CI?
 
-Yes. The binary is statically linked and runs in any container that
-matches its target triple. For CI use, point `MEMRYZED_DATA_DIR` at a
-writable location in your runner. CI is generally not the place to
-build long-term memory, but it is useful for testing integrations.
+Yes, on glibc-based images (Debian, Ubuntu, Amazon Linux, and most
+others). The bundled embedding runtime needs glibc, so musl-only
+images such as Alpine are not supported yet. For CI use, point
+`MEMRYZED_DATA_DIR` at a writable location in your runner. CI is
+generally not the place to build long-term memory, but it is useful
+for testing integrations.
 
 ## How big does the database get?
 

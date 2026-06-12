@@ -5,20 +5,22 @@ wired into your AI agent. It should take five to ten minutes.
 
 ## Requirements
 
-Memryzed is a single statically linked binary with no external runtime
-dependencies. It works on:
+Memryzed is a single self-contained binary; the only thing it fetches
+at runtime is the embedding model, downloaded once on first use. It
+works on:
 
 - macOS (Apple Silicon and Intel)
-- Linux x86_64 (glibc and musl)
-- Linux aarch64
+- Linux x86_64 (glibc 2.35+)
+- Linux aarch64 (glibc 2.35+)
 - Windows x86_64
-- Windows on ARM
 - WSL on Windows
 
-You need at least 200 MB of free disk space (most of which is the
-embedding model downloaded on first run) and an MCP-aware coding agent.
-Memryzed has been tested with Claude Code, Kiro CLI, Codex CLI, Cursor,
-Copilot CLI, and Continue. Any other MCP-aware client should work.
+Alpine and other musl-based Linux are not supported yet (the bundled
+embedding runtime requires glibc). You need at least 200 MB of free
+disk space (most of which is the embedding model downloaded on first
+run) and an MCP-aware coding agent. Memryzed has been tested with
+Claude Code, Kiro CLI, Codex CLI, Cursor, Copilot CLI, and Continue.
+Any other MCP-aware client should work.
 
 ## Step 1: Install the binary
 
@@ -35,7 +37,7 @@ Windows Command Prompt:
     curl -fsSL https://memryzed.com/install.cmd -o install.cmd && install.cmd
 
 The installer downloads the correct binary for your platform from
-GitHub Releases, verifies its checksum, places it at
+memryzed.com, verifies its checksum, places it at
 `~/.memryzed/bin/memryzed`, and adds that directory to your shell PATH.
 On Windows, the binary is placed at `%LOCALAPPDATA%\memryzed\bin\` and
 added to the user PATH via the registry.
@@ -75,8 +77,9 @@ client names and where each one keeps its configuration.
 
 MCP clients read their configuration on startup, so close your agent
 fully and reopen it. From this point on, your agent has access to the
-eight Memryzed tools (`recall`, `remember`, `forget`, `list_memories`,
-`checkpoint`, `resume`, `list_sessions`, `end_session`).
+nine Memryzed tools (`recall`, `remember`, `forget`, `list_memories`,
+`extract_from`, `checkpoint`, `resume`, `list_sessions`,
+`end_session`).
 
 ## Step 5: Verify everything works
 

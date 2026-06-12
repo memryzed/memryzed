@@ -11,7 +11,7 @@ The `CHANGELOG.md` is the authoritative record of what has shipped.
 The v1.0 release is the focus of current work. It is fully specified
 in `docs/specs/v1.md`. The scope is:
 
-- Local MCP server with eight tools.
+- Local MCP server with nine tools.
 - Three-scope memory model (global, project, session).
 - Per-repo session checkpoint and resume.
 - SQLite storage with vector and full-text indexes.
