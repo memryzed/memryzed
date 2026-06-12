@@ -1,7 +1,6 @@
 # Distribution artifacts
 
-This directory holds the release and installation tooling for
-Memryzed.
+This directory holds the installation tooling for Memryzed.
 
 ## Install scripts
 
@@ -12,51 +11,63 @@ Memryzed.
 - `install.cmd` — Windows Command Prompt shim that bootstraps
   PowerShell. Served from `https://memryzed.com/install.cmd`.
 
-These are the canonical hand-written installers. They download
-release archives from GitHub Releases, verify SHA-256 checksums,
-install the binary to the standard location, and update PATH.
+These are the canonical, hand-written installers. Each one detects the
+platform, downloads the matching release archive **from
+`memryzed.com/releases/`** (resolving the version from
+`releases/latest.txt`), verifies its SHA-256 checksum, installs the
+binary to the standard location, and updates PATH. They install
+atomically, so an upgrade does not need the user to quit a running
+agent.
 
-To publish them, copy the three files to the website's `public/`
-directory (or wherever `memryzed.com` serves static files from).
-They are committed here so they are version-controlled alongside
-the code they install.
+They are committed here so the install logic is version-controlled
+next to the code it installs and is auditable by anyone who runs
+`curl ... | bash`.
+
+### Keeping the served copy in sync
+
+`memryzed.com` serves its own copy of these files (from the website
+project's `public/` directory). This directory is the source; when a
+script changes, the website copy must be updated too. Treat the two
+as one logical artifact and update them together to avoid drift.
 
 ## Release pipeline
 
 The release workflow lives at `.github/workflows/release.yml`. It
-triggers on a version tag (`vX.Y.Z` or a pre-release `vX.Y.Z-...`),
-builds the binary for every supported target, packages each into a
-`.tar.gz` (Unix) or `.zip` (Windows) with a `.sha256` sidecar, and
-publishes them to a GitHub Release.
+triggers on a version tag (`vX.Y.Z`, or a pre-release `vX.Y.Z-...`)
+and:
 
-cargo-dist configuration lives in the root `Cargo.toml` under
-`[workspace.metadata.dist]`. When the GitHub repository exists, run:
+- Builds the `memryzed` binary for every supported target on a native
+  runner (no cross-compiling).
+- Smoke-tests each binary (`memryzed --version`) on its own
+  architecture.
+- Packages each into a `.tar.gz` (Unix) or `.zip` (Windows) with a
+  `.sha256` sidecar, named `memryzed-<target>.{tar.gz,zip}` so the
+  install scripts find them.
+- Generates a build-provenance attestation for each artifact.
+- Publishes everything to a GitHub Release.
 
-    cargo install cargo-dist
-    cargo dist init
-
-to regenerate `.github/workflows/release.yml` with the exact matrix
-cargo-dist expects, then commit the result. The hand-written
-workflow here is the interim reference and produces compatible
-artifact names (`memryzed-<target>.tar.gz`, `.zip`) so the install
-scripts work either way.
+The pipeline has **no AWS or deploy credentials**. Promoting a release
+to `memryzed.com/releases/` is a separate manual step performed from a
+trusted machine; see `docs/development/release-process.md`.
 
 ## Supported targets
 
-    aarch64-apple-darwin
-    x86_64-apple-darwin
-    x86_64-unknown-linux-gnu
-    x86_64-unknown-linux-musl
-    aarch64-unknown-linux-gnu
+    x86_64-unknown-linux-gnu     (glibc 2.35+)
+    aarch64-unknown-linux-gnu    (glibc 2.35+)
+    x86_64-apple-darwin          (Intel macOS)
+    aarch64-apple-darwin         (Apple Silicon)
     x86_64-pc-windows-msvc
-    aarch64-pc-windows-msvc
+
+musl (Alpine) and Windows on ARM are not built: the bundled embedding
+runtime requires glibc, and Windows-ARM ONNX support is unverified.
 
 ## Cutting a release
 
-See `docs/development/release-process.md` for the full procedure.
-The short version, once the repo and tags exist:
+See `docs/development/release-process.md` for the full procedure. The
+short version, once the repo and tags exist:
 
-    git tag -a v0.1.0 -m "Memryzed 0.1.0"
-    git push origin v0.1.0
+    git tag -a v0.7.0 -m "Memryzed 0.7.0"
+    git push origin v0.7.0
 
-The workflow does the rest.
+CI builds, attests, and publishes the GitHub Release. You then promote
+the artifacts to `memryzed.com` from a trusted machine.
