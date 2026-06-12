@@ -1,0 +1,23 @@
+{
+  "dataset": "longmemeval-s",
+  "dataset_source": "mteb/LongMemEval (multi_session), Hugging Face",
+  "protocol": "per-question: each question is evaluated against its own multi-session haystack (~476 sessions); a hit is when a relevant session is in the top-K retrieved.",
+  "metric": "retrieval recall@K",
+  "questions": 133,
+  "scenes": 133,
+  "avg_haystack_sessions": 476,
+  "recall_at_k": {
+    "1": 0.5865,
+    "3": 0.7669,
+    "5": 0.8421,
+    "10": 0.9023
+  },
+  "memryzed_version": "0.6.0",
+  "embedding_model": "bge-small-en-v1.5",
+  "retrieval": "hybrid: vector + FTS5 + lexical fused with Reciprocal Rank Fusion; context-window embedding; no reranker; no LLM",
+  "tuning": "none; never tuned on test. Headline figures are un-reranked.",
+  "reranked": false,
+  "hardware": "AWS EC2 c7i.2xlarge (8 vCPU, 15 GiB), Amazon Linux 2023",
+  "embed_runtime_seconds": 2485,
+  "notes": "Pure local retrieval, no API keys and no network at query time. Reproduce with benchmarks/ harness: convert mteb/LongMemEval multi_session into per-scene normalized datasets, then run memryzed-bench over each scene and aggregate recall@K weighted by question count."
+}

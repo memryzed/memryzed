@@ -85,8 +85,24 @@ The harness emits a JSON result object:
 ```
 
 Result files belong under `benchmarks/results/`, which is
-gitignored. Published numbers are tagged with the Memryzed version
-and the embedding model, per `docs/specs/benchmarks.md`.
+gitignored, except for published, methodology-complete results that
+are force-added so they travel with the repository.
+
+## Published results
+
+LongMemEval-S (`benchmarks/results/longmemeval-s.json`), retrieval
+recall@K, 133 questions each against its own ~476-session haystack,
+BGE-small embedder, RRF hybrid retrieval with context-window
+embedding, un-reranked and never tuned on test:
+
+    R@1   0.587
+    R@3   0.767
+    R@5   0.842
+    R@10  0.902
+
+Measured on an AWS c7i.2xlarge (Amazon Linux 2023), Memryzed 0.6.0.
+This is a pure-local result: no API keys and no network at query
+time. See the result file for full methodology.
 
 ## Honesty
 
