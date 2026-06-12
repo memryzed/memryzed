@@ -30,8 +30,9 @@ with Memryzed cleanly:
 
 ## Specifications
 
-The complete v1 specification, used as the source of truth during
-development:
+The original design specification, kept as a historical record (the
+shipped product has evolved since; `CHANGELOG.md` and the user docs
+are authoritative):
 
 - `specs/v1.md`
 - `specs/benchmarks.md` - the quality-benchmarks plan: which
