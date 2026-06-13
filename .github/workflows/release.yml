@@ -117,6 +117,12 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: build
+    # Publish whatever artifacts the matrix produced, even if one target
+    # fails to build. A single failing leg (e.g. a platform with a
+    # toolchain regression) must not block shipping the others. The
+    # download step below only fetches artifacts that were actually
+    # uploaded.
+    if: ${{ always() && needs.build.result != 'cancelled' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -125,6 +131,15 @@ jobs:
         with:
           merge-multiple: true
           path: artifacts
+      - name: Fail if no artifacts were produced
+        run: |
+          set -euo pipefail
+          count=$(find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l)
+          echo "artifact archives found: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no build artifacts were produced; nothing to release"
+            exit 1
+          fi
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
