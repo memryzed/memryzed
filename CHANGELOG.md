@@ -12,6 +12,20 @@ For the conventions used to write entries in this file, see
 
 ### Added
 
+(none)
+
+### Changed
+
+(none)
+
+### Fixed
+
+(none)
+
+## [0.7.1] - 2026-06-13
+
+### Added
+
 - Single background engine across sessions. Every agent session spawns
   its own `memryzed serve`, and each would otherwise run its own
   embedding engine against the shared store, multiplying CPU with the
@@ -133,7 +147,18 @@ For the conventions used to write entries in this file, see
 
 ### Fixed
 
-(none)
+- aarch64 Linux release builds. The prebuilt ONNX Runtime for ARM
+  requires glibc 2.38+, which failed to link against the broad-compat
+  build environment. ARM Linux now links Microsoft's official ONNX
+  Runtime (glibc ~2.27) and ships `libonnxruntime.so` next to the
+  binary, so the build runs on Debian 12, Ubuntu 22.04 ARM, and
+  RHEL/Rocky 9. The install scripts place the library alongside the
+  executable.
+- Windows builds no longer fail on a dead-code lint, and Claude Code
+  hook removal now works on Windows (hook matching no longer depended
+  on path-separator escaping in serialized JSON).
+- The release pipeline publishes the artifacts that built successfully
+  even if one target fails, rather than blocking the whole release.
 
 ### Security
 

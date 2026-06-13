@@ -109,9 +109,12 @@ jobs:
           cp README.md LICENSE NOTICE "$staging/"
           # On aarch64-linux the binary dynamically links Microsoft's
           # libonnxruntime.so; ship it alongside the binary so the
-          # $ORIGIN rpath resolves it at runtime.
+          # $ORIGIN rpath resolves it at runtime. Preserve the symlink
+          # chain (libonnxruntime.so -> .so.1 -> .so.1.24.2) with -P so
+          # the archive carries one real file plus two small symlinks,
+          # not three ~18 MB copies.
           if [[ -n "${ORT_SO_DIR:-}" ]]; then
-            cp "$ORT_SO_DIR"/libonnxruntime.so* "$staging/"
+            cp -P "$ORT_SO_DIR"/libonnxruntime.so* "$staging/"
           fi
           if [[ "${{ matrix.target }}" == *windows* ]]; then
             7z a "$staging.zip" "$staging" >/dev/null

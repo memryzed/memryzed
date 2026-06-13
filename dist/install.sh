@@ -100,13 +100,15 @@ mv -f "$new" "$dest" \
 
 # Some targets (currently aarch64 Linux) ship a bundled
 # libonnxruntime.so that the binary resolves via an $ORIGIN rpath, so
-# it must sit next to the binary. Install any such libraries the same
-# atomic way. Globs that match nothing are skipped.
+# it must sit next to the binary. The archive carries one real library
+# plus symlinks (libonnxruntime.so -> .so.1 -> .so.1.24.2); preserve
+# them with -P so we don't write three full copies. Install each the
+# same atomic way. Globs that match nothing are skipped.
 for lib in "${tmp}/memryzed-${target}"/libonnxruntime.so*; do
-  [ -e "$lib" ] || continue
+  [ -e "$lib" ] || [ -L "$lib" ] || continue
   libdest="${INSTALL_DIR}/$(basename "$lib")"
   libnew="${libdest}.new.$$"
-  cp "$lib" "$libnew" || err "cannot write $libdest"
+  cp -P "$lib" "$libnew" || err "cannot write $libdest"
   mv -f "$libnew" "$libdest" || { rm -f "$libnew"; err "cannot install $libdest"; }
 done
 
