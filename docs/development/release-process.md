@@ -209,6 +209,23 @@ The GitHub Release is the build output; the install endpoint
 (`memryzed.com/releases/`) is updated by a human from a trusted
 machine that holds the AWS credentials. CI never has them.
 
+The one-shot script `.script-deploy.sh` at the repo root automates the
+whole promotion. From a trusted machine with `gh` authenticated and
+the AWS profile configured:
+
+       ./.script-deploy.sh              # promote the version in Cargo.toml
+       ./.script-deploy.sh v0.7.1       # promote a specific tag
+       DRY_RUN=1 ./.script-deploy.sh    # preview without changing anything
+
+It downloads the release artifacts, verifies every checksum, requires
+all expected target archives to be present, uploads them to
+`s3://memryzed.com/releases/v<version>/`, points `latest.txt` at the
+new version (skip with `--no-latest`), re-syncs the install scripts
+from `dist/`, invalidates the CDN, and verifies the live endpoint. It
+is idempotent.
+
+The equivalent manual steps, if you ever need them:
+
 1. Download the artifacts from the GitHub Release (or the run's
    attestation-verified artifacts).
 2. Verify each archive against its `.sha256`.
