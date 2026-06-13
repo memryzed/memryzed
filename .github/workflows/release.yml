@@ -37,13 +37,21 @@ jobs:
           # fail with "GLIBC_2.xx not found" on Ubuntu 22.04 / Debian 12.
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
-          # Native ARM runner: no cross-toolchain, and ort downloads the
-          # real aarch64 ONNX Runtime. Hand cross-compiling this fails
-          # (toolchain mismatch with the prebuilt ONNX), so build native.
+          # Native ARM runner. pyke's prebuilt aarch64 ONNX Runtime is
+          # compiled against glibc 2.38+, which will not link on the
+          # 2.35 runner (undefined __isoc23_strtol). Instead we link
+          # Microsoft's official aarch64 ONNX Runtime (built on an old
+          # manylinux, glibc ~2.27) via ORT_LIB_PATH and ship its
+          # libonnxruntime.so next to the binary. See the "Fetch ONNX
+          # Runtime" step below.
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-22.04-arm
-          - target: x86_64-apple-darwin
-            os: macos-13
+            onnx_so: "1"
+          # Intel macOS (x86_64-apple-darwin / macos-13) is intentionally
+          # not built: GitHub's free macos-13 runners are effectively
+          # unavailable (jobs sit queued indefinitely). Apple Silicon
+          # covers current Macs; revisit Intel if runner availability
+          # improves.
           - target: aarch64-apple-darwin
             os: macos-14
           - target: x86_64-pc-windows-msvc
@@ -60,6 +68,31 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Fetch ONNX Runtime (aarch64-linux)
+        if: matrix.onnx_so
+        shell: bash
+        run: |
+          set -euo pipefail
+          # ort 2.0 targets ONNX Runtime 1.24.x. Microsoft's official
+          # aarch64 build is compiled on an old manylinux (glibc ~2.27),
+          # so it links and runs on every modern ARM distro, unlike
+          # pyke's prebuilt (glibc 2.38+).
+          ort_ver="1.24.2"
+          url="https://github.com/microsoft/onnxruntime/releases/download/v${ort_ver}/onnxruntime-linux-aarch64-${ort_ver}.tgz"
+          mkdir -p "$RUNNER_TEMP/ort"
+          curl -fsSL "$url" -o "$RUNNER_TEMP/ort.tgz"
+          tar xzf "$RUNNER_TEMP/ort.tgz" -C "$RUNNER_TEMP/ort" --strip-components=1
+          lib="$RUNNER_TEMP/ort/lib"
+          test -f "$lib/libonnxruntime.so" || { echo "::error::libonnxruntime.so not found"; exit 1; }
+          # ort-sys links against the build pointed to by ORT_LIB_PATH
+          # instead of downloading pyke's binary. ORT_PREFER_DYNAMIC_LINK
+          # makes it link the .so (not expect static .a files).
+          echo "ORT_LIB_PATH=$lib" >> "$GITHUB_ENV"
+          echo "ORT_PREFER_DYNAMIC_LINK=1" >> "$GITHUB_ENV"
+          # Resolve the .so from the binary's own directory at runtime.
+          echo "RUSTFLAGS=-C link-args=-Wl,-rpath,\$ORIGIN" >> "$GITHUB_ENV"
+          echo "ORT_SO_DIR=$lib" >> "$GITHUB_ENV"
+
       - name: Build
         run: cargo build --profile dist --target ${{ matrix.target }} --package memryzed-cli
 
@@ -74,6 +107,12 @@ jobs:
           mkdir "$staging"
           cp "target/${{ matrix.target }}/dist/$bin" "$staging/"
           cp README.md LICENSE NOTICE "$staging/"
+          # On aarch64-linux the binary dynamically links Microsoft's
+          # libonnxruntime.so; ship it alongside the binary so the
+          # $ORIGIN rpath resolves it at runtime.
+          if [[ -n "${ORT_SO_DIR:-}" ]]; then
+            cp "$ORT_SO_DIR"/libonnxruntime.so* "$staging/"
+          fi
           if [[ "${{ matrix.target }}" == *windows* ]]; then
             7z a "$staging.zip" "$staging" >/dev/null
             certutil -hashfile "$staging.zip" SHA256 | sed -n '2p' | tr -d ' \r' > "$staging.zip.sha256.tmp"

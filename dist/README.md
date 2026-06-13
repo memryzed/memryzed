@@ -52,14 +52,23 @@ trusted machine; see `docs/development/release-process.md`.
 
 ## Supported targets
 
-    x86_64-unknown-linux-gnu     (glibc 2.35+)
-    aarch64-unknown-linux-gnu    (glibc 2.35+)
-    x86_64-apple-darwin          (Intel macOS)
+    x86_64-unknown-linux-gnu     (glibc 2.35+, self-contained binary)
+    aarch64-unknown-linux-gnu    (glibc 2.27+, ships libonnxruntime.so)
     aarch64-apple-darwin         (Apple Silicon)
     x86_64-pc-windows-msvc
 
-musl (Alpine) and Windows on ARM are not built: the bundled embedding
-runtime requires glibc, and Windows-ARM ONNX support is unverified.
+Most targets are a single self-contained binary. aarch64 Linux is the
+exception: pyke's prebuilt ONNX Runtime for ARM requires glibc 2.38+,
+so we instead link Microsoft's official ARM build (glibc ~2.27) and
+ship its `libonnxruntime.so` next to the binary. The install scripts
+place that library alongside the executable.
+
+Not built:
+
+- Intel macOS (x86_64-apple-darwin): GitHub's free macos-13 runners
+  sit queued indefinitely. Apple Silicon covers current Macs.
+- musl (Alpine) and Windows on ARM: the embedding runtime requires
+  glibc, and Windows-ARM ONNX support is unverified.
 
 ## Cutting a release
 

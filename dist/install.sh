@@ -98,6 +98,18 @@ chmod +x "$new"
 mv -f "$new" "$dest" \
   || { rm -f "$new"; err "cannot install to $dest"; }
 
+# Some targets (currently aarch64 Linux) ship a bundled
+# libonnxruntime.so that the binary resolves via an $ORIGIN rpath, so
+# it must sit next to the binary. Install any such libraries the same
+# atomic way. Globs that match nothing are skipped.
+for lib in "${tmp}/memryzed-${target}"/libonnxruntime.so*; do
+  [ -e "$lib" ] || continue
+  libdest="${INSTALL_DIR}/$(basename "$lib")"
+  libnew="${libdest}.new.$$"
+  cp "$lib" "$libnew" || err "cannot write $libdest"
+  mv -f "$libnew" "$libdest" || { rm -f "$libnew"; err "cannot install $libdest"; }
+done
+
 add_path() {
   rc="$1"
   [ -f "$rc" ] || return 0
