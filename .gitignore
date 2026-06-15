@@ -4,7 +4,6 @@
 **/*.rs.bk
 *.pdb
 .s*
-!.script-deploy.sh
 .d*
 # IDE / editor
 .idea/
