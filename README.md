@@ -8,6 +8,16 @@ durable memory across sessions and resumable working state per repository.
 
 Your agent stops forgetting. Your work stops restarting from zero.
 
+## See it work
+
+Tell your agent something once:
+
+![Agent stores a preference via Memryzed](docs/assets/demo-1-remember.png)
+
+Ask later, in a new conversation — it remembers:
+
+![Agent recalls the preference via Memryzed](docs/assets/demo-2-recall.png)
+
 ## Status
 
 Pre-1.0. Memryzed is feature-complete against the v1 specification
